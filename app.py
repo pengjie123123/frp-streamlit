@@ -35,6 +35,33 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 
 # ——————————————————————————————
+# Sklearn Compatibility Patch
+# ——————————————————————————————
+def apply_sklearn_compatibility_patch():
+    """Apply patches for sklearn compatibility issues"""
+    try:
+        from sklearn.compose import _column_transformer
+        
+        # Patch missing _RemainderColsList if needed
+        if not hasattr(_column_transformer, '_RemainderColsList'):
+            class _RemainderColsList(list):
+                """Compatibility class for older sklearn versions"""
+                def __init__(self, remainder_columns):
+                    super().__init__(remainder_columns)
+                    self.remainder_columns = remainder_columns
+            
+            _column_transformer._RemainderColsList = _RemainderColsList
+            print("Applied _RemainderColsList compatibility patch")
+        
+        return True
+    except Exception as e:
+        print(f"Failed to apply compatibility patch: {e}")
+        return False
+
+# Apply the patch immediately
+apply_sklearn_compatibility_patch()
+
+# ——————————————————————————————
 # Database Configuration Functions
 # ——————————————————————————————
 
@@ -96,6 +123,37 @@ def get_raw_connection():
 
 # 给其他地方用到的 DB_NAME（比如 UI 文案）
 host, port, DB_USER, DB_PASSWORD, DB_NAME = _load_db_config_from_env_or_secrets()
+
+# ——————————————————————————————
+# Safe Model Loading Functions
+# ——————————————————————————————
+def safe_pickle_load(pickled_data):
+    """Safely load pickled model data with version compatibility handling"""
+    try:
+        # First try direct loading
+        return pickle.loads(pickled_data)
+    except AttributeError as e:
+        if "_RemainderColsList" in str(e):
+            print("Detected _RemainderColsList compatibility issue, applying fix...")
+            # Apply the patch again if needed
+            apply_sklearn_compatibility_patch()
+            # Try loading again
+            return pickle.loads(pickled_data)
+        else:
+            raise e
+    except Exception as e:
+        st.error(f"Failed to load model: {str(e)}")
+        st.info("This may be due to scikit-learn version incompatibility. Please retrain the model.")
+        return None
+
+def load_model_from_base64(base64_data):
+    """Load model from base64 encoded pickle data with error handling"""
+    try:
+        pickled_data = base64.b64decode(base64_data.encode())
+        return safe_pickle_load(pickled_data)
+    except Exception as e:
+        st.error(f"Failed to decode and load model: {str(e)}")
+        return None
 
 # ——————————————————————————————
 # Global Functions for Model Training (pickle-safe)
@@ -2936,8 +2994,12 @@ class ModelCacheManager:
                 result = conn.execute(text(query), {"model_key": model_key}).fetchone()
                 
                 if result:
-                    # 反序列化模型
-                    model_data = pickle.loads(base64.b64decode(result[3].encode()))
+                    # 安全地反序列化模型
+                    model_data = load_model_from_base64(result[3])
+                    
+                    if model_data is None:
+                        st.error("Failed to load model data. The model may be incompatible with current scikit-learn version.")
+                        return None
                     
                     return {
                         'model_name': result[0],
@@ -10634,16 +10696,18 @@ with tabs[tab_indexes["predictions"]]:
                 
                 if preprocessing_info.get('feature_encoder'):
                     try:
-                        import pickle
-                        feature_encoder = pickle.loads(base64.b64decode(preprocessing_info['feature_encoder'].encode()))
+                        feature_encoder = load_model_from_base64(preprocessing_info['feature_encoder'])
+                        if feature_encoder is None:
+                            st.warning("Failed to load feature encoder due to version compatibility")
                     except Exception as e:
                         st.warning(f"Failed to load feature encoder: {e}")
                         st.warning("This model was saved before the preprocessing fix. Please retrain the model to use cached preprocessors.")
                 
                 if preprocessing_info.get('feature_scaler'):
                     try:
-                        import pickle
-                        feature_scaler = pickle.loads(base64.b64decode(preprocessing_info['feature_scaler'].encode()))
+                        feature_scaler = load_model_from_base64(preprocessing_info['feature_scaler'])
+                        if feature_scaler is None:
+                            st.warning("Failed to load feature scaler due to version compatibility")
                     except Exception as e:
                         st.warning(f"Failed to load feature scaler: {e}")
                         st.warning("This model was saved before the preprocessing fix. Please retrain the model to use cached preprocessors.")
@@ -10708,16 +10772,18 @@ with tabs[tab_indexes["predictions"]]:
                 
                 if preprocessing_info.get('feature_encoder'):
                     try:
-                        import pickle
-                        feature_encoder = pickle.loads(base64.b64decode(preprocessing_info['feature_encoder'].encode()))
+                        feature_encoder = load_model_from_base64(preprocessing_info['feature_encoder'])
+                        if feature_encoder is None:
+                            st.warning("Failed to load feature encoder due to version compatibility")
                     except Exception as e:
                         st.warning(f"Failed to load feature encoder: {e}")
                         st.warning("This model was saved before the preprocessing fix. Please retrain the model to use cached preprocessors.")
                 
                 if preprocessing_info.get('feature_scaler'):
                     try:
-                        import pickle
-                        feature_scaler = pickle.loads(base64.b64decode(preprocessing_info['feature_scaler'].encode()))
+                        feature_scaler = load_model_from_base64(preprocessing_info['feature_scaler'])
+                        if feature_scaler is None:
+                            st.warning("Failed to load feature scaler due to version compatibility")
                     except Exception as e:
                         st.warning(f"Failed to load feature scaler: {e}")
                         st.warning("This model was saved before the preprocessing fix. Please retrain the model to use cached preprocessors.")
