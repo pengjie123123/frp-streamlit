@@ -35,6 +35,69 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 
 # ——————————————————————————————
+# Database Configuration Functions
+# ——————————————————————————————
+
+def _load_db_config_from_env_or_secrets():
+    """
+    云端优先读 st.secrets， 本地用环境变量（.env）
+    支持 DB_HOST 写成 'host:port'
+    """
+    def _get(key, default=None):
+        # 先 secrets，再环境变量
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets.get(key, default)
+        return os.getenv(key, default)
+
+    host_raw = _get("DB_HOST", "localhost")         # e.g. shortline.proxy.rlwy.net:12150
+    user     = _get("DB_USER", "root")
+    pwd      = _get("DB_PASSWORD", "666666")
+    dbname   = _get("DB_NAME", "haigui_database")
+
+    host = host_raw
+    port = _get("DB_PORT")  # 可选；多数情况下不用单独给
+
+    if ":" in host_raw:     # 兼容 host:port 的形式
+        host, port = host_raw.split(":", 1)
+
+    port = int(port) if port else 3306
+    return host, port, user, pwd, dbname
+
+@st.cache_resource
+def get_db_engine():
+    """
+    用 SQLAlchemy 建 Engine（mysql+pymysql）
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import QueuePool
+
+    host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
+    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
+
+    engine = create_engine(
+        url,
+        poolclass=QueuePool,
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=5,
+        max_overflow=10,
+    )
+    return engine
+
+def get_raw_connection():
+    """
+    用于需要原生 mysql.connector 连接的地方
+    """
+    import mysql.connector
+    host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
+    return mysql.connector.connect(
+        host=host, port=port, user=user, password=pwd, database=dbname, charset="utf8mb4"
+    )
+
+# 给其他地方用到的 DB_NAME（比如 UI 文案）
+host, port, DB_USER, DB_PASSWORD, DB_NAME = _load_db_config_from_env_or_secrets()
+
+# ——————————————————————————————
 # Global Functions for Model Training (pickle-safe)
 # ——————————————————————————————
 def global_clean_categorical_features(X):
@@ -2069,37 +2132,10 @@ def show_loading_animation(message="Loading..."):
 # ——————————————————————————————
 Base = declarative_base()
 
-# Get database configuration from environment variables
+# Load environment variables
 load_dotenv()
-DB_USER = os.environ.get("DB_USER", "root")
-DB_PASSWORD = os.environ.get("DB_PASSWORD", "666666")  # MySQL password
-DB_HOST = os.environ.get("DB_HOST", "localhost")
-DB_NAME = os.environ.get("DB_NAME", "haigui_database")
 
-# Create database engine (using connection pool)
-@st.cache_resource
-def get_db_engine():
-    """Get database engine, using connection pool to optimize performance"""
-    try:
-        connection_string = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
-        print(f"Connecting to database: {connection_string}")  # Debug info
-        engine = create_engine(
-            connection_string,
-            poolclass=QueuePool,
-            pool_size=10,
-            max_overflow=20,
-            pool_timeout=30,
-            pool_pre_ping=True
-        )
-        # Test connection
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        print(f"Successfully connected to database: {DB_NAME}")
-        return engine
-    except Exception as e:
-        print(f"Database connection failed: {e}")
-        st.error(f"Database connection failed: {e}")
-        return None
+# Note: Database configuration now handled by functions above
 
 # ——————————————————————————————
 # 6. IP Address Validation Functions
