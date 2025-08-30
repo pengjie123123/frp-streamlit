@@ -99,7 +99,8 @@ def get_db_engine():
     from sqlalchemy.pool import QueuePool
 
     host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
-    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
+    # 添加SSL和认证参数以解决caching_sha2_password认证问题
+    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&ssl_disabled=true&auth_plugin=mysql_native_password"
 
     engine = create_engine(
         url,
@@ -110,6 +111,13 @@ def get_db_engine():
         max_overflow=3,      # 减少最大溢出连接
         pool_timeout=30,     # 连接超时
         pool_reset_on_return='commit',  # 连接返回时重置
+        connect_args={
+            'auth_plugin': 'mysql_native_password',
+            'ssl_disabled': True,
+            'connect_timeout': 60,
+            'read_timeout': 60,
+            'write_timeout': 60
+        }
     )
     
     # 添加SQL查询日志来监控大查询
@@ -121,6 +129,34 @@ def get_db_engine():
             print(f"[BIG SQL DETECTED] {statement[:100]}...")
         elif "research_data" in statement:
             print(f"[SQL] Limited query on research_data")
+    
+    # 测试连接
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("Database connection successful")
+    except Exception as e:
+        print(f"Database connection failed: {e}")
+        # 如果认证失败，尝试不指定认证插件的备选方案
+        if "caching_sha2_password" in str(e) or "auth_plugin" in str(e):
+            print("Trying fallback connection without auth_plugin specification...")
+            fallback_url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&ssl_disabled=true"
+            engine = create_engine(
+                fallback_url,
+                poolclass=QueuePool,
+                pool_pre_ping=True,
+                pool_recycle=3600,
+                pool_size=2,
+                max_overflow=3,
+                pool_timeout=30,
+                pool_reset_on_return='commit',
+                connect_args={
+                    'ssl_disabled': True,
+                    'connect_timeout': 60,
+                    'read_timeout': 60,
+                    'write_timeout': 60
+                }
+            )
     
     return engine
 
