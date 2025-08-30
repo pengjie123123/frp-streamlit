@@ -104,13 +104,24 @@ def get_db_engine():
     engine = create_engine(
         url,
         poolclass=QueuePool,
-        pool_pre_ping=False,  # 禁用预ping减少网络请求
-        pool_recycle=86400,  # 24小时刷新
-        pool_size=2,        # 进一步减少连接池大小
-        max_overflow=3,     # 减少最大溢出连接
-        pool_timeout=30,    # 添加连接超时
+        pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
+        pool_recycle=3600,   # 调整为1小时，减少连接重建频率
+        pool_size=2,         # 保持小连接池
+        max_overflow=3,      # 减少最大溢出连接
+        pool_timeout=30,     # 连接超时
         pool_reset_on_return='commit',  # 连接返回时重置
     )
+    
+    # 添加SQL查询日志来监控大查询
+    from sqlalchemy import event
+    @event.listens_for(engine, "before_cursor_execute")
+    def _log_sql(conn, cursor, statement, parameters, context, executemany):
+        # 只记录对research_data的大查询
+        if "research_data" in statement and "LIMIT" not in statement:
+            print(f"[BIG SQL DETECTED] {statement[:100]}...")
+        elif "research_data" in statement:
+            print(f"[SQL] Limited query on research_data")
+    
     return engine
 
 def get_raw_connection():
@@ -245,45 +256,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# ——————————————————————————————
-# Traffic Debugging - Log every page load
-# ——————————————————————————————
-import sys
-print(f"[TRAFFIC DEBUG] Page load at {datetime.now()}", file=sys.stderr)
-print(f"[TRAFFIC DEBUG] Session ID: {st.session_state.get('session_id', 'new')}", file=sys.stderr)
-
-# ——————————————————————————————
-# Health Check Detection and Lightweight Response
-# ——————————————————————————————
-def detect_health_check():
-    """检测是否为健康检查请求并提供轻量级响应"""
-    # 检查查询参数
-    query_params = st.experimental_get_query_params()
-    
-    # 如果是健康检查请求，返回最小响应
-    if 'health' in query_params or 'ping' in query_params:
-        st.text("OK")
-        st.stop()
-    
-    # 检查是否可能是自动化访问（基于session行为）
-    if 'session_id' not in st.session_state:
-        st.session_state.session_id = datetime.now().isoformat()
-        st.session_state.page_loads = 0
-        st.session_state.first_load_time = datetime.now()
-    
-    st.session_state.page_loads += 1
-    
-    # 如果在很短时间内没有用户交互，可能是自动化访问
-    time_since_first_load = (datetime.now() - st.session_state.first_load_time).total_seconds()
-    if st.session_state.page_loads == 1 and time_since_first_load < 5:
-        # 可能是健康检查，提供最小响应
-        print(f"[HEALTH CHECK] Minimal response for potential automated access", file=sys.stderr)
-        st.markdown("### System Status: ✅ Online")
-        st.stop()
-
-# 运行健康检查检测
-detect_health_check()
 
 # ——————————————————————————————
 # 2. Custom CSS Style Injection
@@ -2033,9 +2005,22 @@ def render_data_overview_admin(df, table_name, data_manager):
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
-            data_manager.invalidate_cache(f"table_{table_name}")
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+                data_manager.invalidate_cache(f"table_{table_name}")
+                st.rerun()
+        with col_b:
+            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
+                with st.spinner("Loading full dataset..."):
+                    full_data = load_full_data()
+                    if full_data is not None:
+                        st.session_state.df_raw = full_data
+                        data_manager.invalidate_cache(f"table_{table_name}")
+                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to load full dataset")
     
     # Data table
     if len(df) > 0:
@@ -4011,7 +3996,7 @@ class FRPDataPreprocessor:
         
         return final_data
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # 缓存1小时，减少重复查询
 def load_default_data():
     """Load default data and perform basic cleaning"""
     engine = get_db_engine()
@@ -4030,9 +4015,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 加载数据
-                df = pd.read_sql("SELECT * FROM research_data", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table")
+                # 减少首屏读取量：只读取最新1000条记录，避免大查询
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4066,6 +4051,27 @@ def load_default_data():
     else:
         st.error("Database engine not available")
         return None
+
+@st.cache_data(ttl=7200)  # 全量数据缓存2小时
+def load_full_data():
+    """Load full dataset - only when explicitly requested"""
+    engine = get_db_engine()
+    if engine:
+        try:
+            print(f"Loading FULL data from database: {DB_NAME}")
+            with engine.connect() as conn:
+                # 加载全量数据
+                df = pd.read_sql("SELECT * FROM research_data", engine)
+                print(f"Successfully loaded FULL dataset: {len(df)} rows")
+            
+            # Basic data cleaning
+            df.replace({"Notreported": np.nan, "SMD": np.nan, "smd": np.nan}, inplace=True)
+            
+            return df
+        except Exception as e:
+            print(f"Error loading full data: {e}")
+            return None
+    return None
 
 def create_advanced_model_dataset():
     """Create advanced model dataset (using improved preprocessing methods)"""
@@ -4107,11 +4113,6 @@ inject_custom_css()
 
 # Initialize data manager
 data_manager = DataManager()
-
-# 对于外部监控请求，返回简单响应
-if detect_health_check():
-    st.success("System is running")
-    st.stop()
 
 # Get database connection and initialize system
 engine = get_db_engine()
