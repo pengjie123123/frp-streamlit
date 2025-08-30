@@ -4389,6 +4389,7 @@ else:
 if "authenticated_user" not in st.session_state:
     with tabs[tab_indexes["login_register"]]:
         
+        engine = get_db_engine()  # 获取引擎检查连接状态
         if not engine:
             st.error("❌ Database connection failed. Please check database configuration.")
             st.markdown("""
@@ -4545,6 +4546,7 @@ if "authenticated_user" not in st.session_state:
 # ——————————————————————————————
 else:
     with tabs[tab_indexes["data_management"]]:
+        engine = get_db_engine()  # 获取引擎检查连接状态
         if not engine:
             st.error("❌ Database connection failed. Please check database configuration.")
             st.markdown("""
