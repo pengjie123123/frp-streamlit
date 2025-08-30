@@ -29,6 +29,20 @@ import time
 import io
 from sklearn.metrics import r2_score, mean_squared_error
 import pymysql
+
+# Streamlit配置 - 禁用自动刷新和监控机制
+st.set_page_config(
+    page_title="FRP Rebar Durability Prediction",
+    page_icon="🔬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# 禁用文件监控和自动刷新
+if 'STREAMLIT_SERVER_FILE_WATCHER_TYPE' not in os.environ:
+    os.environ['STREAMLIT_SERVER_FILE_WATCHER_TYPE'] = 'none'
+if 'STREAMLIT_SERVER_HEADLESS' not in os.environ:
+    os.environ['STREAMLIT_SERVER_HEADLESS'] = 'true'
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -104,10 +118,11 @@ def get_db_engine():
     engine = create_engine(
         url,
         poolclass=QueuePool,
-        pool_pre_ping=True,
-        pool_recycle=86400,  # 24小时
-        pool_size=1,         # 最小连接池
-        max_overflow=3,      # 最小溢出连接
+        pool_pre_ping=False,  # 禁用pre_ping以减少网络流量
+        pool_recycle=86400,   # 24小时
+        pool_size=1,          # 最小连接池
+        max_overflow=0,       # 禁用溢出连接以减少流量
+        echo=False
     )
     return engine
 
@@ -243,6 +258,17 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 添加配置以防止自动刷新
+if 'app_initialized' not in st.session_state:
+    st.session_state.app_initialized = True
+    # 清除任何可能的自动刷新机制
+    try:
+        import streamlit.config as _config
+        _config.set_option("server.runOnSave", False)
+        _config.set_option("server.fileWatcherType", "none")
+    except:
+        pass
 
 # ——————————————————————————————
 # 2. Custom CSS Style Injection
@@ -1872,6 +1898,7 @@ def inject_custom_css():
 # 3. Helper Functions for Role-based UI Rendering
 # ——————————————————————————————
 
+@st.cache_data(ttl=86400)  # Cache for 24 hours to reduce database calls
 def check_database_connection():
     """检查数据库连接状态和数据可用性"""
     try:
@@ -1885,8 +1912,8 @@ def check_database_connection():
             if not result:
                 return False, "research_data table not found", 0
             
-            # 获取记录数量
-            count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
+            # 获取记录数量 - 使用LIMIT避免大表扫描
+            count = conn.execute(text("SELECT COUNT(*) FROM research_data LIMIT 1")).scalar()
             return True, f"Connected to {DB_NAME}", count
             
     except Exception as e:
@@ -3970,7 +3997,8 @@ class FRPDataPreprocessor:
         
         return final_data
 
-@st.cache_data(ttl=3600)  # 缓存1小时减少数据库查询
+@st.cache_data(ttl=86400)  # 24小时缓存
+@st.cache_data(ttl=86400)  # Cache for 24 hours to prevent frequent reloads
 def load_default_data():
     """Load default data and perform basic cleaning - optimized for network efficiency"""
     engine = get_db_engine()
@@ -3985,23 +4013,15 @@ def load_default_data():
                     print("research_data table does not exist")
                     return None
                 
-                # 获取记录数量并检查是否过多
-                count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
-                print(f"Found {count} records in research_data table")
-                
-                # 警告：如果数据量太大，只加载部分数据
-                if count > 10000:
-                    print(f"Warning: Large dataset ({count} records). Loading only 10,000 records to optimize performance.")
-                
                 # 加载数据 - 限制数据量以减少网络流量
-                # 只加载必要的列，限制行数
+                # 只加载必要的列，限制行数，避免COUNT查询
                 df = pd.read_sql("""
                     SELECT id, temperature, ph, chloride, time_days, mass_loss_percent, 
                            specimen_id, specimen_type, environment_type, test_method
                     FROM research_data 
-                    LIMIT 10000
+                    LIMIT 1000
                 """, engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table (limited)")
+                print(f"Successfully loaded {len(df)} rows from research_data table (limited to 1000)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4032,7 +4052,7 @@ def load_default_data():
     # 如果数据库失败，返回空DataFrame
     return pd.DataFrame()
 
-@st.cache_data(ttl=1800)  # 30分钟缓存用于预览
+@st.cache_data(ttl=86400)  # 24小时缓存用于预览
 def load_data_preview(limit=1000):
     """Load a preview of data for display purposes"""
     engine = get_db_engine()
