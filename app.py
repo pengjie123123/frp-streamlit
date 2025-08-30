@@ -4114,8 +4114,8 @@ inject_custom_css()
 # Initialize data manager
 data_manager = DataManager()
 
-# Get database connection and initialize system
-engine = get_db_engine()
+# 完全移除启动时的数据库引擎获取，改为真正的延迟加载
+# engine = get_db_engine()  # 注释掉这行，避免启动时连接数据库
 
 # 完全禁用启动时的数据库初始化，改为延迟加载
 if "system_initialized" not in st.session_state:
@@ -4125,6 +4125,7 @@ if "system_initialized" not in st.session_state:
 # 数据库初始化延迟到实际需要时
 def initialize_database_if_needed():
     """延迟初始化数据库，只在实际需要时执行"""
+    engine = get_db_engine()  # 只在需要时获取引擎
     if not st.session_state.get("system_initialized", False) and engine:
         try:
             create_tables(engine)
@@ -4171,6 +4172,7 @@ db_status = "Not Connected"
 db_color = "#95a5a6"
 
 # 可选：尝试获取数据库信息，但不强制要求
+engine = get_db_engine()  # 在需要时获取引擎
 if engine and st.session_state.get("db_connection_status") == "connected":
     try:
         with engine.connect() as conn:
@@ -4229,6 +4231,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     # Display administrator information
+    engine = get_db_engine()  # 在需要时获取引擎
     if engine:
         admin_name = "Chao Wu"
         st.markdown(f"""
@@ -4264,6 +4267,7 @@ with st.sidebar:
         )
         
         if st.button("Login", type="primary", use_container_width=True):
+            engine = get_db_engine()  # 在需要时获取引擎
             if engine:
                 user = authenticate_user(user_email, engine)
                 if user:
