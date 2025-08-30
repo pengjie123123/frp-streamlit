@@ -253,11 +253,7 @@ def diagnose_model_performance(y_true, y_pred, model_name="Model"):
 # ——————————————————————————————
 # 1. Page Configuration
 # ——————————————————————————————
-st.set_page_config(
-    page_title="FRP Rebar Durability Prediction Platform",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Page config已在文件开头设置，这里不再重复
 
 # 添加配置以防止自动刷新
 if 'app_initialized' not in st.session_state:
