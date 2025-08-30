@@ -7455,61 +7455,6 @@ with tabs[tab_indexes["model_configuration"]]:
                     st.error("Failed to load dataset. Please check database connection.")
     else:
         # 数据已加载，显示配置界面
-        # Statistics cards
-        col1, col2, col3, col4 = st.columns(4)
-        
-        # Get dataset statistics
-        raw_data_count = len(st.session_state.df_raw) if st.session_state.df_raw is not None else 0
-        has_model_dataset = "model_dataset" in st.session_state and st.session_state.model_dataset is not None
-        model_data_count = len(st.session_state.model_dataset) if has_model_dataset else 0
-        current_target = st.session_state.get("selected_target", "Not Set")
-        current_model = st.session_state.get("selected_model", "Not Set")
-        
-        with col1:
-            st.markdown(f"""
-            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
-                <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">RAW DATASET</h4>
-                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{raw_data_count:,}</h2>
-                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Records available</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            color = "#27ae60" if has_model_dataset else "#95a5a6"
-            status = f"{model_data_count:,}" if has_model_dataset else "Not Ready"
-            
-            st.markdown(f"""
-            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid {color}; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
-                <h4 style="color: {color}; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ML DATASET</h4>
-                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{status}</h2>
-                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Preprocessed features</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            target_color = "#e74c3c" if current_target == "Not Set" else "#f39c12"
-            target_display = current_target if current_target != "Not Set" else "None"
-            
-            st.markdown(f"""
-            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid {target_color}; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
-                <h4 style="color: {target_color}; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">TARGET VARIABLE</h4>
-                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{target_display}">{target_display if len(target_display) <= 12 else target_display[:12] + '...'}</h2>
-                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Prediction target</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col4:
-            model_color = "#e74c3c" if current_model == "Not Set" else "#8B5FBF"
-            model_display = current_model if current_model != "Not Set" else "None"
-            
-            st.markdown(f"""
-            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid {model_color}; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
-                <h4 style="color: {model_color}; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ML MODEL</h4>
-                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{model_display}</h2>
-                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Algorithm selected</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
         # Main configuration layout - 根据用户角色调整布局
         if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]["role"] == "admin":
             # Admin用户：使用双列布局
