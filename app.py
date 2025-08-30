@@ -1998,16 +1998,29 @@ def render_data_overview_admin(df, table_name, data_manager):
     st.markdown("#### Dataset Preview")
     
     # Information bar
-    info_col1, info_col2 = st.columns([5, 2])
+    info_col1, info_col2 = st.columns([3, 1])
     with info_col1:
         if original_count != unique_count:
             st.info(f"Showing {unique_count:,} unique records (filtered from {original_count:,} total), {len(stats_df.columns)} fields")
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
-            data_manager.invalidate_cache(f"table_{table_name}")
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+                data_manager.invalidate_cache(f"table_{table_name}")
+                st.rerun()
+        with col_b:
+            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
+                with st.spinner("Loading full dataset..."):
+                    full_data = load_full_data()
+                    if full_data is not None:
+                        st.session_state.df_raw = full_data
+                        data_manager.invalidate_cache(f"table_{table_name}")
+                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to load full dataset")
     
     # Data table
     if len(df) > 0:
@@ -7442,19 +7455,64 @@ with tabs[tab_indexes["model_configuration"]]:
     </div>
     """, unsafe_allow_html=True)
     
-    # 只有在用户明确需要时才加载数据，避免健康检查触发
     if st.session_state.df_raw is None:
-        st.info("Dataset is required for model configuration. Click below to load.")
-        if st.button("Load Dataset", key="load_dataset_for_config"):
-            with st.spinner("Loading dataset for model configuration..."):
-                st.session_state.df_raw = load_default_data()
-                if st.session_state.df_raw is not None:
-                    st.success("Dataset loaded successfully!")
-                    st.rerun()  # 重新运行以更新界面
-                else:
-                    st.error("Failed to load dataset. Please check database connection.")
+        st.warning("Dataset not loaded. Please check database connection.")
     else:
-        # 数据已加载，显示配置界面
+        # Statistics cards
+        col1, col2, col3, col4 = st.columns(4)
+        
+        # Get dataset statistics
+        raw_data_count = len(st.session_state.df_raw) if st.session_state.df_raw is not None else 0
+        has_model_dataset = "model_dataset" in st.session_state and st.session_state.model_dataset is not None
+        model_data_count = len(st.session_state.model_dataset) if has_model_dataset else 0
+        current_target = st.session_state.get("selected_target", "Not Set")
+        current_model = st.session_state.get("selected_model", "Not Set")
+        
+        with col1:
+            st.markdown(f"""
+            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
+                <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">RAW DATASET</h4>
+                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{raw_data_count:,}</h2>
+                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Records available</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            color = "#27ae60" if has_model_dataset else "#95a5a6"
+            status = f"{model_data_count:,}" if has_model_dataset else "Not Ready"
+            
+            st.markdown(f"""
+            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid {color}; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
+                <h4 style="color: {color}; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ML DATASET</h4>
+                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{status}</h2>
+                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Preprocessed features</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            target_color = "#e74c3c" if current_target == "Not Set" else "#f39c12"
+            target_display = current_target if current_target != "Not Set" else "None"
+            
+            st.markdown(f"""
+            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid {target_color}; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
+                <h4 style="color: {target_color}; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">TARGET VARIABLE</h4>
+                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="{target_display}">{target_display if len(target_display) <= 12 else target_display[:12] + '...'}</h2>
+                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Prediction target</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            model_color = "#e74c3c" if current_model == "Not Set" else "#8B5FBF"
+            model_display = current_model if current_model != "Not Set" else "None"
+            
+            st.markdown(f"""
+            <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid {model_color}; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
+                <h4 style="color: {model_color}; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">ML MODEL</h4>
+                <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{model_display}</h2>
+                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Algorithm selected</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
         # Main configuration layout - 根据用户角色调整布局
         if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]["role"] == "admin":
             # Admin用户：使用双列布局
@@ -12198,10 +12256,6 @@ def initialize_session_state():
     # UI状态相关
     if "show_all_features" not in st.session_state:
         st.session_state.show_all_features = False
-    
-    # 数据加载标志 - 用于智能加载数据
-    if "data_load_pending" not in st.session_state:
-        st.session_state.data_load_pending = True
 
 # ——————————————————————————————
 # Main Application Entry Point
@@ -12212,8 +12266,10 @@ def main():
     # 初始化会话状态
     initialize_session_state()
     
-    # 不在启动时自动加载数据，避免健康检查触发大查询
-    # 数据将在用户实际需要时按需加载
+    # 加载默认数据 - 只在真正需要时加载
+    if st.session_state.df_raw is None and st.session_state.get("data_load_pending", False):
+        st.session_state.df_raw = load_default_data()
+        st.session_state.data_load_pending = False
     
     # 记录页面访问
     if "authenticated_user" in st.session_state:
@@ -12237,8 +12293,8 @@ def render_footer():
 # 调用主应用程序
 if __name__ == "__main__":
     try:
-        # 不再调用main()，避免重复数据加载
-        # main()
+        # 确保数据在需要时能够加载，保持现有的缓存优化
+        main()
         render_footer()
     except Exception as e:
         st.error(f"Application Error: {e}")
