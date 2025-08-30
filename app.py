@@ -2005,14 +2005,15 @@ def render_data_overview_admin(df, table_name, data_manager):
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+        # 优化按钮布局：让刷新按钮占用更宽的空间
+        refresh_col, spacer_col = st.columns([3, 1])
+        with refresh_col:
+            if st.button("🔄 Refresh Data", use_container_width=True, key="refresh_overview", type="secondary"):
                 data_manager.invalidate_cache(f"table_{table_name}")
                 st.rerun()
-        with col_b:
-            # 自动加载数据，无需手动按钮
-            pass
+        with spacer_col:
+            # 留空作为间隔
+            st.write("")
     
     # Data table
     if len(df) > 0:
