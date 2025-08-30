@@ -1997,18 +1997,30 @@ def render_data_overview_admin(df, table_name, data_manager):
     # Data table preview
     st.markdown("#### Dataset Preview")
     
-    # Information bar - 调整比例让信息卡片更长，按钮对齐右侧
-    info_col1, info_col2 = st.columns([5, 2])
+    # Information bar
+    info_col1, info_col2 = st.columns([3, 1])
     with info_col1:
         if original_count != unique_count:
             st.info(f"Showing {unique_count:,} unique records (filtered from {original_count:,} total), {len(stats_df.columns)} fields")
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        # 按钮右对齐布局
-        if st.button("Refresh Data", use_container_width=True, key="refresh_overview", type="secondary"):
-            data_manager.invalidate_cache(f"table_{table_name}")
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+                data_manager.invalidate_cache(f"table_{table_name}")
+                st.rerun()
+        with col_b:
+            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
+                with st.spinner("Loading full dataset..."):
+                    full_data = load_full_data()
+                    if full_data is not None:
+                        st.session_state.df_raw = full_data
+                        data_manager.invalidate_cache(f"table_{table_name}")
+                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to load full dataset")
     
     # Data table
     if len(df) > 0:
@@ -4003,9 +4015,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 加载所有数据（依靠24小时缓存机制保证性能）
-                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table (all records)")
+                # 减少首屏读取量：只读取最新1000条记录，避免大查询
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4040,25 +4052,6 @@ def load_default_data():
         st.error("Database engine not available")
         return None
 
-def ensure_data_loaded():
-    """智能数据加载：只在需要时才从数据库加载数据"""
-    if st.session_state.get("df_raw") is None and st.session_state.get("data_load_pending", True):
-        try:
-            print("🔄 Loading data on demand...")
-            default_data = load_default_data()
-            if default_data is not None:
-                st.session_state.df_raw = default_data
-                st.session_state.data_load_pending = False
-                print(f"✅ On-demand loaded {len(default_data)} records successfully")
-                return True
-            else:
-                print("⚠️ Failed to load data on demand")
-                return False
-        except Exception as e:
-            print(f"❌ On-demand load failed: {e}")
-            return False
-    return st.session_state.get("df_raw") is not None
-
 @st.cache_data(ttl=86400)  # 全量数据缓存24小时
 def load_full_data():
     """Load full dataset - only when explicitly requested"""
@@ -4082,9 +4075,8 @@ def load_full_data():
 
 def create_advanced_model_dataset():
     """Create advanced model dataset (using improved preprocessing methods)"""
-    # 使用智能数据加载，避免不必要的数据库查询
-    if not ensure_data_loaded():
-        st.error("❌ Failed to load dataset for model creation")
+    if "df_raw" not in st.session_state or st.session_state.df_raw is None:
+        st.error("Please load raw data first")
         return None
     
     # Create data preprocessor
@@ -4131,15 +4123,11 @@ if engine:
         admin_success, admin_email, admin_status = initialize_admin(engine)
         st.session_state.system_initialized = True
 
-# Initialize session state with optimized data loading
+# Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
-    # 首先尝试从缓存中获取数据，避免重复加载
+    # 延迟加载：只有当用户真正需要数据时才加载
     st.session_state.df_raw = None
     st.session_state.data_load_pending = True
-    
-    # 只在真正需要时才加载数据（比如用户首次访问数据相关页面）
-    # 这样可以避免健康检查等系统访问触发不必要的数据库查询
-    print("📋 Data loading deferred until needed - avoiding unnecessary DB queries")
 
 # Verify data loading status
 if st.session_state.df_raw is not None:
@@ -4573,27 +4561,29 @@ else:
             </div>
             """, unsafe_allow_html=True)
         
-        # Read data with improved error handling and smart loading
+        # Read data with improved error handling
         try:
-            # Use smart data loading - only load when actually accessing data tabs
+            # Use fixed data loading function with explicit database connection
             if table_name == "research_data":
-                # 智能数据加载：只在实际需要时才加载
-                data_loaded = ensure_data_loaded()
-                
-                if data_loaded:
-                    df = st.session_state.df_raw
-                else:
+                df = data_manager.get_data(
+                    f"table_{table_name}",
+                    lambda: load_default_data()
+                )
+                # 验证数据是否正确加载
+                if df is None:
                     st.error("❌ Failed to load data from database. Please check database connection.")
                     # 提供重新加载选项
-                    if st.button("Retry Database Connection", key="retry_db_connection"):
+                    if st.button("🔄 Retry Database Connection", key="retry_db_connection"):
                         data_manager.invalidate_cache(f"table_{table_name}")
                         st.session_state.df_raw = None  # 清除缓存
-                        st.session_state.data_load_pending = True
                         st.rerun()
                     st.stop()
                     
+                # 更新全局状态
+                st.session_state.df_raw = df
+                
             else:
-                # 对其他表的处理 - 使用缓存机制
+                # 对其他表的处理
                 df = data_manager.get_data(
                     f"table_{table_name}",
                     lambda: pd.read_sql(f"SELECT * FROM {table_name}", engine)
@@ -4603,7 +4593,7 @@ else:
                 st.error(f"❌ No data found in table '{table_name}' or data loading failed.")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("Reload Data", key="reload_data_btn"):
+                    if st.button("🔄 Reload Data", key="reload_data_btn"):
                         data_manager.invalidate_cache(f"table_{table_name}")
                         st.session_state.df_raw = None  # 清除缓存
                         st.rerun()
@@ -6674,7 +6664,7 @@ else:
                                                use_container_width=True,
                                                key="clear_all_cache_btn"):
                                         try:
-                                            st.info("Clearing all cached models...")
+                                            st.info("🔄 Clearing all cached models...")
                                             deleted_count = model_cache_manager.clear_all_models()
                                             if deleted_count > 0:
                                                 st.success(f"🗑️ Cleared {deleted_count} cached models.")
@@ -7464,6 +7454,14 @@ with tabs[tab_indexes["model_configuration"]]:
         </p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # 智能数据加载：如果需要数据但尚未加载，则自动加载
+    if st.session_state.df_raw is None:
+        with st.spinner("Loading dataset for model configuration..."):
+            st.session_state.df_raw = load_default_data()
+            if st.session_state.df_raw is not None:
+                st.success("✅ Dataset loaded successfully!")
+                st.rerun()  # 重新运行以更新界面
     
     if st.session_state.df_raw is None:
         st.warning("Dataset not loaded. Please check database connection.")
@@ -12266,6 +12264,10 @@ def initialize_session_state():
     # UI状态相关
     if "show_all_features" not in st.session_state:
         st.session_state.show_all_features = False
+    
+    # 数据加载标志 - 用于智能加载数据
+    if "data_load_pending" not in st.session_state:
+        st.session_state.data_load_pending = True
 
 # ——————————————————————————————
 # Main Application Entry Point
@@ -12276,17 +12278,10 @@ def main():
     # 初始化会话状态
     initialize_session_state()
     
-    # 数据已在初始化时自动加载，无需额外处理
-    # 加载默认数据 - 数据应该已经在初始化时加载完成
+    # 加载默认数据 - 只在真正需要时加载
     if st.session_state.df_raw is None and st.session_state.get("data_load_pending", False):
-        # 备用加载机制：如果初始化时加载失败，再次尝试
-        try:
-            st.session_state.df_raw = load_default_data()
-            st.session_state.data_load_pending = False
-            if st.session_state.df_raw is not None:
-                print(f"✅ Fallback data loading successful: {len(st.session_state.df_raw)} records")
-        except Exception as e:
-            print(f"❌ Fallback data loading failed: {e}")
+        st.session_state.df_raw = load_default_data()
+        st.session_state.data_load_pending = False
     
     # 记录页面访问
     if "authenticated_user" in st.session_state:
