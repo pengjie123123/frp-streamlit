@@ -4078,17 +4078,14 @@ def complete_data_processing(df):
         return df
         
     try:
-            print(f"Data shape after cleaning: {df.shape}")
-            print(f"Missing values per column: {df.isnull().sum().sum()} total missing values")
-            
-            return df
-            
-        except Exception as e:
-            print(f"Data loading error: {e}")
-            st.error(f"Database loading error: {e}")
-            return None
-    else:
-        st.error("Database engine not available")
+        print(f"Data shape after cleaning: {df.shape}")
+        print(f"Missing values per column: {df.isnull().sum().sum()} total missing values")
+        
+        return df
+        
+    except Exception as e:
+        print(f"Data loading error: {e}")
+        st.error(f"Database loading error: {e}")
         return None
 
 def create_advanced_model_dataset():
