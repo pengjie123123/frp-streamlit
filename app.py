@@ -1997,23 +1997,18 @@ def render_data_overview_admin(df, table_name, data_manager):
     # Data table preview
     st.markdown("#### Dataset Preview")
     
-    # Information bar
-    info_col1, info_col2 = st.columns([3, 1])
+    # Information bar - 调整比例让信息卡片更长，按钮对齐右侧
+    info_col1, info_col2 = st.columns([5, 2])
     with info_col1:
         if original_count != unique_count:
             st.info(f"Showing {unique_count:,} unique records (filtered from {original_count:,} total), {len(stats_df.columns)} fields")
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        # 优化按钮布局：让刷新按钮占用更宽的空间
-        refresh_col, spacer_col = st.columns([3, 1])
-        with refresh_col:
-            if st.button("🔄 Refresh Data", use_container_width=True, key="refresh_overview", type="secondary"):
-                data_manager.invalidate_cache(f"table_{table_name}")
-                st.rerun()
-        with spacer_col:
-            # 留空作为间隔
-            st.write("")
+        # 按钮右对齐布局
+        if st.button("Refresh Data", use_container_width=True, key="refresh_overview", type="secondary"):
+            data_manager.invalidate_cache(f"table_{table_name}")
+            st.rerun()
     
     # Data table
     if len(df) > 0:
@@ -4070,7 +4065,7 @@ def create_advanced_model_dataset():
     """Create advanced model dataset (using improved preprocessing methods)"""
     if "df_raw" not in st.session_state or st.session_state.df_raw is None:
         # 尝试自动加载数据
-        st.info("🔄 Loading dataset for model creation...")
+        st.info("Loading dataset for model creation...")
         try:
             data = load_default_data()
             if data is not None:
@@ -4135,7 +4130,7 @@ if "df_raw" not in st.session_state:
     
     # 尝试自动加载默认数据
     try:
-        print("🔄 Auto-loading default dataset...")
+        print("Auto-loading default dataset...")
         default_data = load_default_data()
         if default_data is not None:
             st.session_state.df_raw = default_data
@@ -4591,7 +4586,7 @@ else:
                 if df is None:
                     st.error("❌ Failed to load data from database. Please check database connection.")
                     # 提供重新加载选项
-                    if st.button("🔄 Retry Database Connection", key="retry_db_connection"):
+                    if st.button("Retry Database Connection", key="retry_db_connection"):
                         data_manager.invalidate_cache(f"table_{table_name}")
                         st.session_state.df_raw = None  # 清除缓存
                         st.rerun()
@@ -4611,7 +4606,7 @@ else:
                 st.error(f"❌ No data found in table '{table_name}' or data loading failed.")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.button("🔄 Reload Data", key="reload_data_btn"):
+                    if st.button("Reload Data", key="reload_data_btn"):
                         data_manager.invalidate_cache(f"table_{table_name}")
                         st.session_state.df_raw = None  # 清除缓存
                         st.rerun()
@@ -6682,7 +6677,7 @@ else:
                                                use_container_width=True,
                                                key="clear_all_cache_btn"):
                                         try:
-                                            st.info("🔄 Clearing all cached models...")
+                                            st.info("Clearing all cached models...")
                                             deleted_count = model_cache_manager.clear_all_models()
                                             if deleted_count > 0:
                                                 st.success(f"🗑️ Cleared {deleted_count} cached models.")
