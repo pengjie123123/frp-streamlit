@@ -6688,7 +6688,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
         </div>
         """, unsafe_allow_html=True)
         
-        @st.cache_data(ttl=300)  # 缓存5分钟，用户管理数据变化较频繁
+        @st.cache_data(ttl=86400)  # 缓存24小时，减少数据库查询
         def get_user_stats():
             """获取用户统计信息"""
             engine = get_db_engine()
