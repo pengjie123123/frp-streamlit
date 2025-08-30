@@ -4114,14 +4114,26 @@ inject_custom_css()
 # Initialize data manager
 data_manager = DataManager()
 
-# Get database connection and initialize system
+# Get database connection and initialize system with error handling
 engine = get_db_engine()
 if engine:
     # 只在session state中没有初始化标记时才执行这些操作
     if "system_initialized" not in st.session_state:
-        create_tables(engine)
-        admin_success, admin_email, admin_status = initialize_admin(engine)
-        st.session_state.system_initialized = True
+        try:
+            create_tables(engine)
+            admin_success, admin_email, admin_status = initialize_admin(engine)
+            st.session_state.system_initialized = True
+            print("✅ Database initialization completed successfully")
+        except Exception as e:
+            print(f"❌ Database initialization failed: {e}")
+            st.error(f"Database initialization failed. The application will run in limited mode. Error: {str(e)[:100]}...")
+            # 标记为已初始化但失败，避免重复尝试
+            st.session_state.system_initialized = False
+            st.session_state.db_error = str(e)
+else:
+    print("⚠️ Database engine not available - running in offline mode")
+    st.session_state.system_initialized = False
+    st.session_state.db_error = "Database engine not available"
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
@@ -4144,33 +4156,46 @@ st.markdown(create_gradient_header(
 ), unsafe_allow_html=True)
 
 # Display key metrics with database connection status
-if engine and "authenticated_user" in st.session_state:
+if "authenticated_user" in st.session_state:
     col1, col2, col3, col4 = st.columns(4)
     
     # Get statistical data with error handling
-    try:
-        with engine.connect() as conn:
-            total_records = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar() or 0
-            active_users = conn.execute(
-                text("SELECT COUNT(DISTINCT user_email) FROM operation_logs WHERE DATE(created_at) = CURDATE()")
-            ).scalar() or 0
-            pending_changes = conn.execute(
-                text("SELECT COUNT(*) FROM data_changes WHERE status = 'pending'")
-            ).scalar() or 0
-            
-        # 数据库连接成功，显示正常指标
-        db_status = "Connected"
-        db_color = "#27ae60"
-        
-    except Exception as e:
-        # 数据库连接失败
-        total_records = 0
-        active_users = 0
-        pending_changes = 0
-        db_status = "Disconnected"
-        db_color = "#e74c3c"
-        st.error(f"⚠️ Database connection issue: {e}")
+    total_records = 0
+    active_users = 0
+    pending_changes = 0
+    db_status = "Disconnected"
+    db_color = "#e74c3c"
     
+    if engine:
+        try:
+            with engine.connect() as conn:
+                total_records = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar() or 0
+                active_users = conn.execute(
+                    text("SELECT COUNT(DISTINCT user_email) FROM operation_logs WHERE DATE(created_at) = CURDATE()")
+                ).scalar() or 0
+                pending_changes = conn.execute(
+                    text("SELECT COUNT(*) FROM data_changes WHERE status = 'pending'")
+                ).scalar() or 0
+            
+            # 数据库连接成功，显示正常指标
+            db_status = "Connected"
+            db_color = "#27ae60"
+            
+        except Exception as e:
+            # 数据库连接失败，显示错误信息
+            print(f"Database metrics query failed: {e}")
+            db_status = "Error"
+            db_color = "#e74c3c"
+            # 在UI中显示简化的错误信息
+            if len(str(e)) > 50:
+                error_msg = str(e)[:50] + "..."
+            else:
+                error_msg = str(e)
+            st.warning(f"⚠️ Database connection issue: {error_msg}")
+    else:
+        st.info("ℹ️ Running in offline mode - database not available")
+    
+    # 显示指标卡片
     with col1:
         st.markdown(create_metric_card("Total Records", f"{total_records:,}", 5.2, "normal", 0), unsafe_allow_html=True)
     with col2:
