@@ -104,10 +104,10 @@ def get_db_engine():
     engine = create_engine(
         url,
         poolclass=QueuePool,
-        pool_pre_ping=True,
+        pool_pre_ping=False,  # 禁用预ping减少网络请求
         pool_recycle=86400,  # 24小时刷新
-        pool_size=3,        # 减少连接池大小
-        max_overflow=5,     # 减少最大溢出连接
+        pool_size=2,        # 进一步减少连接池大小
+        max_overflow=3,     # 减少最大溢出连接
         pool_timeout=30,    # 添加连接超时
         pool_reset_on_return='commit',  # 连接返回时重置
     )
@@ -4072,23 +4072,17 @@ data_manager = DataManager()
 # Get database connection and initialize system
 engine = get_db_engine()
 if engine:
-    create_tables(engine)
-    admin_success, admin_email, admin_status = initialize_admin(engine)
+    # 只在session state中没有初始化标记时才执行这些操作
+    if "system_initialized" not in st.session_state:
+        create_tables(engine)
+        admin_success, admin_email, admin_status = initialize_admin(engine)
+        st.session_state.system_initialized = True
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
-    try:
-        with st.spinner("Loading data from database..."):
-            loaded_data = load_default_data()
-            if loaded_data is not None and len(loaded_data) > 0:
-                st.session_state.df_raw = loaded_data
-                print(f"Successfully initialized session data: {len(loaded_data)} records")
-            else:
-                st.session_state.df_raw = None
-                print("Failed to load initial data from database")
-    except Exception as e:
-        st.session_state.df_raw = None
-        print(f"Error during initial data loading: {e}")
+    # 延迟加载：只有当用户真正需要数据时才加载
+    st.session_state.df_raw = None
+    st.session_state.data_load_pending = True
 
 # Verify data loading status
 if st.session_state.df_raw is not None:
