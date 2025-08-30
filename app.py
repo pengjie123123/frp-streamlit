@@ -1998,7 +1998,7 @@ def render_data_overview_admin(df, table_name, data_manager):
     st.markdown("#### Dataset Preview")
     
     # Information bar
-    info_col1, info_col2 = st.columns([2, 5])
+    info_col1, info_col2 = st.columns([5, 2])
     with info_col1:
         if original_count != unique_count:
             st.info(f"Showing {unique_count:,} unique records (filtered from {original_count:,} total), {len(stats_df.columns)} fields")
