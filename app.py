@@ -2291,70 +2291,77 @@ def is_ip_allowed(ip_address):
 # ——————————————————————————————
 def create_tables(engine):
     """Create necessary database tables"""
-    with engine.connect() as conn:
-        # Create user table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                name VARCHAR(255) NOT NULL,
-                institution VARCHAR(255),
-                ip_address VARCHAR(45),
-                role VARCHAR(50) DEFAULT 'viewer',
-                status VARCHAR(50) DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                approved_by VARCHAR(255),
-                approved_at TIMESTAMP NULL
-            )
-        """))
+    try:
+        with engine.connect() as conn:
+            # Create user table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    institution VARCHAR(255),
+                    ip_address VARCHAR(45),
+                    role VARCHAR(50) DEFAULT 'viewer',
+                    status VARCHAR(50) DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    approved_by VARCHAR(255),
+                    approved_at TIMESTAMP NULL
+                )
+            """))
 
-        # Create data change request table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS data_changes (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                user_email VARCHAR(255) NOT NULL,
-                change_type VARCHAR(50) NOT NULL,
-                table_name VARCHAR(50) NOT NULL,
-                record_id INT,
-                old_data JSON,
-                new_data JSON,
-                status VARCHAR(50) DEFAULT 'pending',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                reviewed_by VARCHAR(255),
-                reviewed_at TIMESTAMP NULL,
-                review_comment TEXT
-            )
-        """))
+            # Create data change request table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS data_changes (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_email VARCHAR(255) NOT NULL,
+                    change_type VARCHAR(50) NOT NULL,
+                    table_name VARCHAR(50) NOT NULL,
+                    record_id INT,
+                    old_data JSON,
+                    new_data JSON,
+                    status VARCHAR(50) DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_by VARCHAR(255),
+                    reviewed_at TIMESTAMP NULL,
+                    review_comment TEXT
+                )
+            """))
 
-        # Create operation log table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS operation_logs (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                user_email VARCHAR(255) NOT NULL,
-                operation_type VARCHAR(50) NOT NULL,
-                table_name VARCHAR(50),
-                record_id INT,
-                details JSON,
-                ip_address VARCHAR(45),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
+            # Create operation log table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS operation_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_email VARCHAR(255) NOT NULL,
+                    operation_type VARCHAR(50) NOT NULL,
+                    table_name VARCHAR(50),
+                    record_id INT,
+                    details JSON,
+                    ip_address VARCHAR(45),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
 
-        # Create version control table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS data_versions (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                table_name VARCHAR(50) NOT NULL,
-                record_id INT NOT NULL,
-                version_number INT NOT NULL,
-                data JSON NOT NULL,
-                changed_by VARCHAR(255) NOT NULL,
-                change_type VARCHAR(50),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """))
+            # Create version control table
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS data_versions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    table_name VARCHAR(50) NOT NULL,
+                    record_id INT NOT NULL,
+                    version_number INT NOT NULL,
+                    data JSON NOT NULL,
+                    changed_by VARCHAR(255) NOT NULL,
+                    change_type VARCHAR(50),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """))
 
-        conn.commit()
+            conn.commit()
+            print("Database tables created successfully")
+            return True
+    except Exception as e:
+        print(f"Failed to create database tables: {e}")
+        st.warning("⚠️ Database connection issue detected. Running in offline mode.")
+        return False
 
 # ——————————————————————————————
 # 8. Initialize Administrator Account
@@ -2365,45 +2372,40 @@ def initialize_admin(engine):
     admin_name = os.environ.get("ADMIN_NAME", "System Administrator")
     admin_institution = os.environ.get("ADMIN_INSTITUTION", "System")
 
-    with engine.connect() as conn:
-        try:
-            result = conn.execute(
-                text("SELECT email, name FROM users WHERE role = 'admin' AND status = 'approved'")
-            ).fetchone()
+    try:
+        with engine.connect() as conn:
+            try:
+                result = conn.execute(
+                    text("SELECT email, name FROM users WHERE role = 'admin' AND status = 'approved'")
+                ).fetchone()
 
-            if not result:
-                conn.execute(
-                    text("""
-                        INSERT INTO users (name, email, institution, role, status, approved_by, approved_at, ip_address)
-                        VALUES (:name, :email, :institution, 'admin', 'approved', 'system', NOW(), '127.0.0.1')
-                    """),
-                    {
-                        "name": admin_name,
-                        "email": admin_email,
-                        "institution": admin_institution
-                    }
-                )
-                conn.commit()
-                return True, admin_email, "created"
-            else:
-                existing_email = result._asdict()['email'] if hasattr(result, '_asdict') else result[0]
-                return True, existing_email, "exists"
+                if not result:
+                    conn.execute(
+                        text("""
+                            INSERT INTO users (name, email, institution, role, status, approved_by, approved_at, ip_address)
+                            VALUES (:name, :email, :institution, 'admin', 'approved', 'system', NOW(), '127.0.0.1')
+                        """),
+                        {
+                            "name": admin_name,
+                            "email": admin_email,
+                            "institution": admin_institution
+                        }
+                    )
+                    conn.commit()
+                    return True, admin_email, "created"
+                else:
+                    existing_email = result._asdict()['email'] if hasattr(result, '_asdict') else result[0]
+                    return True, existing_email, "exists"
 
-        except Exception as e:
-            if "Duplicate" in str(e):
-                conn.execute(
-                    text("""
-                        UPDATE users
-                        SET role = 'admin', status = 'approved', approved_by = 'system', approved_at = NOW()
-                        WHERE email = :email
-                    """),
-                    {"email": admin_email}
-                )
-                conn.commit()
-                return True, admin_email, "upgraded"
-            else:
-                print(f"Administrator initialization failed: {e}")
-                return False, None, "error"
+            except Exception as e:
+                if "Duplicate" in str(e):
+                    return True, admin_email, "duplicate"
+                else:
+                    print(f"Database operation error: {e}")
+                    return False, None, "db_error"
+    except Exception as e:
+        print(f"Database connection error in initialize_admin: {e}")
+        return False, None, "connection_error"
 
 # ——————————————————————————————
 # 9. User Authentication and Permission Management
@@ -4155,9 +4157,17 @@ engine = get_db_engine()
 if engine:
     # 只在session state中没有初始化标记时才执行这些操作
     if "system_initialized" not in st.session_state:
-        create_tables(engine)
-        admin_success, admin_email, admin_status = initialize_admin(engine)
+        tables_created = create_tables(engine)
+        if tables_created:
+            admin_success, admin_email, admin_status = initialize_admin(engine)
+        else:
+            admin_success, admin_email, admin_status = False, None, "Database connection failed"
         st.session_state.system_initialized = True
+        st.session_state.database_available = tables_created
+else:
+    st.session_state.system_initialized = True
+    st.session_state.database_available = False
+    st.warning("⚠️ Running in offline mode - some features may be limited")
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
