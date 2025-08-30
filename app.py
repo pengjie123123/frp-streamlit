@@ -90,39 +90,39 @@ def _load_db_config_from_env_or_secrets():
     port = int(port) if port else 3306
     return host, port, user, pwd, dbname
 
+@st.cache_resource
 def get_db_engine():
     """
     用 SQLAlchemy 建 Engine（mysql+pymysql）
-    移除 @st.cache_resource 装饰器，避免启动时自动连接数据库
     """
-    # 使用 session_state 来缓存引擎，避免重复创建
-    if "db_engine" not in st.session_state:
-        try:
-            from sqlalchemy import create_engine
-            from sqlalchemy.pool import QueuePool
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import QueuePool
 
-            host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
-            url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
+    host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
+    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
 
-            engine = create_engine(
-                url,
-                poolclass=QueuePool,
-                pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
-                pool_recycle=3600,   # 调整为1小时，减少连接重建频率
-                pool_size=2,         # 保持小连接池
-                max_overflow=3,      # 减少最大溢出连接
-                pool_timeout=30,     # 连接超时
-                pool_reset_on_return='commit',  # 连接返回时重置
-            )
-            
-            st.session_state.db_engine = engine
-            print("Database engine created successfully")
-            
-        except Exception as e:
-            print(f"Failed to create database engine: {e}")
-            st.session_state.db_engine = None
-            
-    return st.session_state.db_engine
+    engine = create_engine(
+        url,
+        poolclass=QueuePool,
+        pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
+        pool_recycle=3600,   # 调整为1小时，减少连接重建频率
+        pool_size=2,         # 保持小连接池
+        max_overflow=3,      # 减少最大溢出连接
+        pool_timeout=30,     # 连接超时
+        pool_reset_on_return='commit',  # 连接返回时重置
+    )
+    
+    # 添加SQL查询日志来监控大查询
+    from sqlalchemy import event
+    @event.listens_for(engine, "before_cursor_execute")
+    def _log_sql(conn, cursor, statement, parameters, context, executemany):
+        # 只记录对research_data的大查询
+        if "research_data" in statement and "LIMIT" not in statement:
+            print(f"[BIG SQL DETECTED] {statement[:100]}...")
+        elif "research_data" in statement:
+            print(f"[SQL] Limited query on research_data")
+    
+    return engine
 
 def get_raw_connection():
     """
@@ -4015,7 +4015,7 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 读取所有研究数据
+                # 读取全量数据
                 df = pd.read_sql("SELECT * FROM research_data", engine)
                 print(f"Successfully loaded {len(df)} rows from research_data table")
             
@@ -4114,32 +4114,14 @@ inject_custom_css()
 # Initialize data manager
 data_manager = DataManager()
 
-# 完全移除启动时的数据库引擎获取，改为真正的延迟加载
-# engine = get_db_engine()  # 注释掉这行，避免启动时连接数据库
-
-# 完全禁用启动时的数据库初始化，改为延迟加载
-if "system_initialized" not in st.session_state:
-    st.session_state.system_initialized = False
-    st.session_state.db_connection_status = "pending"
-
-# 数据库初始化延迟到实际需要时
-def initialize_database_if_needed():
-    """延迟初始化数据库，只在实际需要时执行"""
-    engine = get_db_engine()  # 只在需要时获取引擎
-    if not st.session_state.get("system_initialized", False) and engine:
-        try:
-            create_tables(engine)
-            admin_success, admin_email, admin_status = initialize_admin(engine)
-            st.session_state.system_initialized = True
-            st.session_state.db_connection_status = "connected"
-            return True
-        except Exception as e:
-            print(f"Database initialization failed: {e}")
-            st.session_state.system_initialized = False
-            st.session_state.db_connection_status = "failed"
-            st.session_state.db_error_message = str(e)
-            return False
-    return st.session_state.get("system_initialized", False)
+# Get database connection and initialize system
+engine = get_db_engine()
+if engine:
+    # 只在session state中没有初始化标记时才执行这些操作
+    if "system_initialized" not in st.session_state:
+        create_tables(engine)
+        admin_success, admin_email, admin_status = initialize_admin(engine)
+        st.session_state.system_initialized = True
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
@@ -4162,18 +4144,10 @@ st.markdown(create_gradient_header(
 ), unsafe_allow_html=True)
 
 # Display key metrics with database connection status
-col1, col2, col3, col4 = st.columns(4)
-
-# 默认值，不依赖数据库
-total_records = "N/A"
-active_users = "N/A"
-pending_changes = "N/A"
-db_status = "Not Connected"
-db_color = "#95a5a6"
-
-# 可选：尝试获取数据库信息，但不强制要求
-engine = get_db_engine()  # 在需要时获取引擎
-if engine and st.session_state.get("db_connection_status") == "connected":
+if engine and "authenticated_user" in st.session_state:
+    col1, col2, col3, col4 = st.columns(4)
+    
+    # Get statistical data with error handling
     try:
         with engine.connect() as conn:
             total_records = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar() or 0
@@ -4184,28 +4158,26 @@ if engine and st.session_state.get("db_connection_status") == "connected":
                 text("SELECT COUNT(*) FROM data_changes WHERE status = 'pending'")
             ).scalar() or 0
             
+        # 数据库连接成功，显示正常指标
         db_status = "Connected"
         db_color = "#27ae60"
         
     except Exception as e:
-        print(f"Database query error: {e}")
-        db_status = "Query Failed"
-        db_color = "#e67e22"
-        
-elif st.session_state.get("db_connection_status") == "failed":
-    db_status = "Connection Failed"
-    db_color = "#e74c3c"
-elif st.session_state.get("db_connection_status") == "pending":
-    db_status = "Not Initialized"
-    db_color = "#f39c12"
-
-with col1:
-    st.markdown(create_metric_card("Total Records", str(total_records), 5.2, "normal", 0), unsafe_allow_html=True)
-with col2:
-    st.markdown(create_metric_card("Active Users Today", str(active_users), 12.3, "normal", 1), unsafe_allow_html=True)
-with col3:
-    st.markdown(create_metric_card("Model Accuracy", "94.7%", 2.1, "normal", 2), unsafe_allow_html=True)
-with col4:
+        # 数据库连接失败
+        total_records = 0
+        active_users = 0
+        pending_changes = 0
+        db_status = "Disconnected"
+        db_color = "#e74c3c"
+        st.error(f"⚠️ Database connection issue: {e}")
+    
+    with col1:
+        st.markdown(create_metric_card("Total Records", f"{total_records:,}", 5.2, "normal", 0), unsafe_allow_html=True)
+    with col2:
+        st.markdown(create_metric_card("Active Users Today", str(active_users), 12.3, "normal", 1), unsafe_allow_html=True)
+    with col3:
+        st.markdown(create_metric_card("Model Accuracy", "94.7%", 2.1, "normal", 2), unsafe_allow_html=True)
+    with col4:
         # 显示数据库连接状态而不是pending changes
         st.markdown(f"""
         <div class="metric-card" style="animation-delay: 0.45s;">
@@ -4231,7 +4203,6 @@ with st.sidebar:
     """, unsafe_allow_html=True)
     
     # Display administrator information
-    engine = get_db_engine()  # 在需要时获取引擎
     if engine:
         admin_name = "Chao Wu"
         st.markdown(f"""
@@ -4267,7 +4238,6 @@ with st.sidebar:
         )
         
         if st.button("Login", type="primary", use_container_width=True):
-            engine = get_db_engine()  # 在需要时获取引擎
             if engine:
                 user = authenticate_user(user_email, engine)
                 if user:
@@ -4389,7 +4359,6 @@ else:
 if "authenticated_user" not in st.session_state:
     with tabs[tab_indexes["login_register"]]:
         
-        engine = get_db_engine()  # 获取引擎检查连接状态
         if not engine:
             st.error("❌ Database connection failed. Please check database configuration.")
             st.markdown("""
@@ -4546,7 +4515,6 @@ if "authenticated_user" not in st.session_state:
 # ——————————————————————————————
 else:
     with tabs[tab_indexes["data_management"]]:
-        engine = get_db_engine()  # 获取引擎检查连接状态
         if not engine:
             st.error("❌ Database connection failed. Please check database configuration.")
             st.markdown("""
