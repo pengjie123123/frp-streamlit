@@ -2011,16 +2011,8 @@ def render_data_overview_admin(df, table_name, data_manager):
                 data_manager.invalidate_cache(f"table_{table_name}")
                 st.rerun()
         with col_b:
-            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
-                with st.spinner("Loading full dataset..."):
-                    full_data = load_full_data()
-                    if full_data is not None:
-                        st.session_state.df_raw = full_data
-                        data_manager.invalidate_cache(f"table_{table_name}")
-                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to load full dataset")
+            # 自动加载数据，无需手动按钮
+            pass
     
     # Data table
     if len(df) > 0:
@@ -4015,9 +4007,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 读取全量数据
-                df = pd.read_sql("SELECT * FROM research_data", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table")
+                # 减少首屏读取量：只读取最新1000条记录，避免大查询
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4076,8 +4068,19 @@ def load_full_data():
 def create_advanced_model_dataset():
     """Create advanced model dataset (using improved preprocessing methods)"""
     if "df_raw" not in st.session_state or st.session_state.df_raw is None:
-        st.error("Please load raw data first")
-        return None
+        # 尝试自动加载数据
+        st.info("🔄 Loading dataset for model creation...")
+        try:
+            data = load_default_data()
+            if data is not None:
+                st.session_state.df_raw = data
+                st.success(f"✅ Dataset loaded successfully: {len(data)} records")
+            else:
+                st.error("❌ Failed to load dataset for model creation")
+                return None
+        except Exception as e:
+            st.error(f"❌ Error loading dataset: {e}")
+            return None
     
     # Create data preprocessor
     engine = get_db_engine()
@@ -4114,32 +4117,34 @@ inject_custom_css()
 # Initialize data manager
 data_manager = DataManager()
 
-# Get database connection and initialize system with error handling
+# Get database connection and initialize system
 engine = get_db_engine()
 if engine:
     # 只在session state中没有初始化标记时才执行这些操作
     if "system_initialized" not in st.session_state:
-        try:
-            create_tables(engine)
-            admin_success, admin_email, admin_status = initialize_admin(engine)
-            st.session_state.system_initialized = True
-            print("✅ Database initialization completed successfully")
-        except Exception as e:
-            print(f"❌ Database initialization failed: {e}")
-            st.error(f"Database initialization failed. The application will run in limited mode. Error: {str(e)[:100]}...")
-            # 标记为已初始化但失败，避免重复尝试
-            st.session_state.system_initialized = False
-            st.session_state.db_error = str(e)
-else:
-    print("⚠️ Database engine not available - running in offline mode")
-    st.session_state.system_initialized = False
-    st.session_state.db_error = "Database engine not available"
+        create_tables(engine)
+        admin_success, admin_email, admin_status = initialize_admin(engine)
+        st.session_state.system_initialized = True
 
-# Initialize session state with improved data loading
+# Initialize session state with automatic data loading
 if "df_raw" not in st.session_state:
-    # 延迟加载：只有当用户真正需要数据时才加载
+    # 自动加载数据，无需用户手动操作
     st.session_state.df_raw = None
     st.session_state.data_load_pending = True
+    
+    # 尝试自动加载默认数据
+    try:
+        print("🔄 Auto-loading default dataset...")
+        default_data = load_default_data()
+        if default_data is not None:
+            st.session_state.df_raw = default_data
+            st.session_state.data_load_pending = False
+            print(f"✅ Auto-loaded {len(default_data)} records successfully")
+        else:
+            print("⚠️ Failed to auto-load data, will remain in pending state")
+    except Exception as e:
+        print(f"❌ Auto-load failed: {e}")
+        # 保持待加载状态，但不阻塞应用启动
 
 # Verify data loading status
 if st.session_state.df_raw is not None:
@@ -4156,46 +4161,33 @@ st.markdown(create_gradient_header(
 ), unsafe_allow_html=True)
 
 # Display key metrics with database connection status
-if "authenticated_user" in st.session_state:
+if engine and "authenticated_user" in st.session_state:
     col1, col2, col3, col4 = st.columns(4)
     
     # Get statistical data with error handling
-    total_records = 0
-    active_users = 0
-    pending_changes = 0
-    db_status = "Disconnected"
-    db_color = "#e74c3c"
-    
-    if engine:
-        try:
-            with engine.connect() as conn:
-                total_records = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar() or 0
-                active_users = conn.execute(
-                    text("SELECT COUNT(DISTINCT user_email) FROM operation_logs WHERE DATE(created_at) = CURDATE()")
-                ).scalar() or 0
-                pending_changes = conn.execute(
-                    text("SELECT COUNT(*) FROM data_changes WHERE status = 'pending'")
-                ).scalar() or 0
+    try:
+        with engine.connect() as conn:
+            total_records = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar() or 0
+            active_users = conn.execute(
+                text("SELECT COUNT(DISTINCT user_email) FROM operation_logs WHERE DATE(created_at) = CURDATE()")
+            ).scalar() or 0
+            pending_changes = conn.execute(
+                text("SELECT COUNT(*) FROM data_changes WHERE status = 'pending'")
+            ).scalar() or 0
             
-            # 数据库连接成功，显示正常指标
-            db_status = "Connected"
-            db_color = "#27ae60"
-            
-        except Exception as e:
-            # 数据库连接失败，显示错误信息
-            print(f"Database metrics query failed: {e}")
-            db_status = "Error"
-            db_color = "#e74c3c"
-            # 在UI中显示简化的错误信息
-            if len(str(e)) > 50:
-                error_msg = str(e)[:50] + "..."
-            else:
-                error_msg = str(e)
-            st.warning(f"⚠️ Database connection issue: {error_msg}")
-    else:
-        st.info("ℹ️ Running in offline mode - database not available")
+        # 数据库连接成功，显示正常指标
+        db_status = "Connected"
+        db_color = "#27ae60"
+        
+    except Exception as e:
+        # 数据库连接失败
+        total_records = 0
+        active_users = 0
+        pending_changes = 0
+        db_status = "Disconnected"
+        db_color = "#e74c3c"
+        st.error(f"⚠️ Database connection issue: {e}")
     
-    # 显示指标卡片
     with col1:
         st.markdown(create_metric_card("Total Records", f"{total_records:,}", 5.2, "normal", 0), unsafe_allow_html=True)
     with col2:
@@ -12291,10 +12283,17 @@ def main():
     # 初始化会话状态
     initialize_session_state()
     
-    # 加载默认数据 - 只在真正需要时加载
+    # 数据已在初始化时自动加载，无需额外处理
+    # 加载默认数据 - 数据应该已经在初始化时加载完成
     if st.session_state.df_raw is None and st.session_state.get("data_load_pending", False):
-        st.session_state.df_raw = load_default_data()
-        st.session_state.data_load_pending = False
+        # 备用加载机制：如果初始化时加载失败，再次尝试
+        try:
+            st.session_state.df_raw = load_default_data()
+            st.session_state.data_load_pending = False
+            if st.session_state.df_raw is not None:
+                print(f"✅ Fallback data loading successful: {len(st.session_state.df_raw)} records")
+        except Exception as e:
+            print(f"❌ Fallback data loading failed: {e}")
     
     # 记录页面访问
     if "authenticated_user" in st.session_state:
