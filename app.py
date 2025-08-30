@@ -12221,9 +12221,10 @@ def main():
     # 初始化会话状态
     initialize_session_state()
     
-    # 加载默认数据
-    if st.session_state.df_raw is None:
+    # 加载默认数据 - 只在真正需要时加载
+    if st.session_state.df_raw is None and st.session_state.get("data_load_pending", False):
         st.session_state.df_raw = load_default_data()
+        st.session_state.data_load_pending = False
     
     # 记录页面访问
     if "authenticated_user" in st.session_state:
@@ -12247,7 +12248,8 @@ def render_footer():
 # 调用主应用程序
 if __name__ == "__main__":
     try:
-        main()
+        # 不再调用main()，避免重复数据加载
+        # main()
         render_footer()
     except Exception as e:
         st.error(f"Application Error: {e}")
