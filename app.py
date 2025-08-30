@@ -105,9 +105,9 @@ def get_db_engine():
         url,
         poolclass=QueuePool,
         pool_pre_ping=True,
-        pool_recycle=3600,  # 1小时而不是5分钟
-        pool_size=3,        # 减少连接池大小
-        max_overflow=5,     # 减少最大溢出连接
+        pool_recycle=86400,  # 24小时
+        pool_size=1,         # 最小连接池
+        max_overflow=3,      # 最小溢出连接
     )
     return engine
 
@@ -2113,7 +2113,7 @@ class DataManager:
             st.session_state.data_cache = {}
             st.session_state.cache_timestamp = {}
     
-    def get_data(self, key, loader_func, ttl=1800):  # 30分钟缓存而不是5分钟
+    def get_data(self, key, loader_func, ttl=86400):  # 24小时缓存
         """Get cached data or reload"""
         current_time = datetime.now()
         
