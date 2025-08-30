@@ -10688,53 +10688,114 @@ with tabs[tab_indexes["predictions"]]:
             st.error(f"Error loading database: {e}")
             st.stop()
     
-    # 模型选择部分 - 只对admin用户显示
-    if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]["role"] == "admin":
-        st.markdown("#### Model Selection")
-        
-        # 检查可用的模型
-        has_current_model = "trained_model" in st.session_state
+    # 确保模型数据集已加载
+    if "model_dataset" not in st.session_state or st.session_state.model_dataset is None:
+        st.info("Loading preprocessed dataset...")
+        try:
+            # 尝试从缓存加载预处理数据
+            preprocessor = FRPDataPreprocessor(engine)
+            cached_datasets = preprocessor.list_cached_datasets()
+            
+            if cached_datasets:
+                # 加载最新的缓存数据集
+                latest_cache = max(cached_datasets, key=lambda x: x['updated_at'])
+                cached_data = preprocessor.get_cached_data(latest_cache['cache_key'])
+                
+                if cached_data:
+                    st.session_state["model_dataset"] = cached_data['data']
+                    st.success(f"Loaded preprocessed dataset: {cached_data['shape']}")
+                    st.rerun()
+                else:
+                    st.warning("Failed to load cached dataset. You may need to preprocess data first.")
+            else:
+                st.warning("No preprocessed datasets found. The prediction interface may have limited functionality.")
+                st.info("To get full functionality, please visit the Model Configuration tab to preprocess data first.")
+        except Exception as e:
+            st.warning(f"Could not load preprocessed dataset: {e}")
+            st.info("Some prediction features may not be available.")
+    
+    # 模型选择部分 - 为所有用户自动选择最佳模型
+    if "selected_model_for_prediction" not in st.session_state:
+        st.info("Auto-selecting best available model...")
         
         try:
             model_cache_manager = ModelCacheManager(engine)
             cached_models = model_cache_manager.list_cached_models()
-            has_cached_models = len(cached_models) > 0
-        except:
-            cached_models = []
-            has_cached_models = False
-        
-        if not has_current_model and not has_cached_models:
-            st.warning("No trained models available. Please train a model first in the Model Training tab.")
+            
+            if cached_models:
+                # 自动选择最佳模型（根据test_r2分数）
+                best_model = None
+                best_score = -1
+                
+                for model in cached_models:
+                    try:
+                        model_details = model_cache_manager.load_model(model['model_key'])
+                        if model_details:
+                            eval_results = model_details.get('evaluation_results', {})
+                            test_r2 = eval_results.get('test_r2', 0)
+                            
+                            if test_r2 > best_score:
+                                best_score = test_r2
+                                best_model = model
+                    except:
+                        continue
+                
+                if best_model:
+                    # 设置自动选择的模型
+                    st.session_state["selected_model_for_prediction"] = {
+                        'model_key': best_model['model_key'],
+                        'model_name': best_model['model_name'],
+                        'target_variable': best_model['target_variable']
+                    }
+                    st.session_state.selected_target = best_model['target_variable']
+                    st.session_state.selected_model = best_model['model_name']
+                    
+                    user_role = st.session_state["authenticated_user"]["role"]
+                    st.success(f"Auto-selected best model: {best_model['model_name']} for {best_model['target_variable']} (R² = {best_score:.3f})")
+                    st.rerun()
+                else:
+                    st.warning("No valid models found. Please contact an administrator.")
+                    st.stop()
+            else:
+                st.warning("No trained models available. Please contact an administrator.")
+                st.stop()
+        except Exception as e:
+            st.error(f"Error accessing models: {e}")
             st.stop()
+    
+    # 显示当前选中的模型信息（对所有用户）
+    if "selected_model_for_prediction" in st.session_state:
+        model_config = st.session_state["selected_model_for_prediction"]
+        st.markdown("#### Current Model")
         
-        # 模型选择选项
-        model_source_options = []
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Algorithm", model_config['model_name'])
+        with col2:
+            st.metric("Target", model_config['target_variable'])
+        with col3:
+            user_role = st.session_state["authenticated_user"]["role"]
+            if user_role == "admin":
+                if st.button("🔄 Change Model", help="Select a different model"):
+                    del st.session_state["selected_model_for_prediction"]
+                    st.rerun()
+    
+    # Admin用户额外的模型选择选项
+    if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]["role"] == "admin":
+        # 检查可用的模型
+        has_current_model = "trained_model" in st.session_state
+        
         if has_current_model:
-            current_model_name = st.session_state.get("selected_model", "Current Model")
-            current_target = st.session_state.get("selected_target", "Unknown Target")
-            model_source_options.append(f"Current Session Model ({current_model_name} - {current_target})")
-        
-        if has_cached_models:
-            for model in cached_models:
-                model_info = f"Cached: {model['model_name']} - {model['target_variable']} ({model['model_key']})"
-                model_source_options.append(model_info)
-        
-        selected_model_source = st.selectbox(
-            "Select model to use for predictions:",
-            model_source_options,
-            help="Choose between current session model or previously cached models"
-        )
-    else:
-        # 对于非admin用户，直接使用Model Configuration中选择的模型
-        if "selected_model_for_prediction" not in st.session_state:
-            st.warning("No model selected. Please select a model in the Model Configuration tab first.")
-            st.stop()
-        
-        # 使用Model Configuration中选择的模型信息
-        selected_model_source = "auto_selected"
+            st.markdown("#### Alternative Model Sources")
+            if st.checkbox("Use Current Session Model", help="Use the model trained in this session instead of cached model"):
+                selected_model_source = "current_session"
+            else:
+                selected_model_source = "auto_selected"
+        else:
+            selected_model_source = "auto_selected"
     
     # 根据选择加载模型
-    if selected_model_source.startswith("Current Session Model"):
+    if selected_model_source == "current_session":
         # 使用当前会话的模型
         model_to_use = st.session_state.trained_model
         model_target = st.session_state.get("selected_target", "Unknown")
@@ -10744,8 +10805,8 @@ with tabs[tab_indexes["predictions"]]:
         
         st.success(f"Using current session model: {model_name} for {model_target}")
         
-    elif selected_model_source == "auto_selected":
-        # 对于非admin用户，使用Model Configuration中选择的模型
+    else:  # auto_selected - 统一处理自动选择的模型
+        # 使用自动选择的模型
         try:
             model_config = st.session_state["selected_model_for_prediction"]
             model_cache_manager = ModelCacheManager(engine)
@@ -10819,82 +10880,6 @@ with tabs[tab_indexes["predictions"]]:
                 st.stop()
         except Exception as e:
             st.error(f"Error loading model from Model Configuration: {e}")
-            st.stop()
-    else:
-        # 使用缓存的模型（admin用户）
-        # 提取model_key
-        model_key = selected_model_source.split('(')[-1].split(')')[0]
-        
-        try:
-            cached_model_details = model_cache_manager.load_model(model_key)
-            if cached_model_details:
-                model_to_use = cached_model_details['model']
-                model_target = cached_model_details['target_variable']
-                model_name = cached_model_details['model_name']
-                
-                # 重建training_feature_info结构
-                feature_info = cached_model_details['feature_info']
-                preprocessing_info = cached_model_details['preprocessing_info']
-                
-                # 从缓存中恢复预处理器对象
-                feature_encoder = None
-                feature_scaler = None
-                
-                if preprocessing_info.get('feature_encoder'):
-                    try:
-                        feature_encoder = load_model_from_base64(preprocessing_info['feature_encoder'])
-                        if feature_encoder is None:
-                            st.warning("Failed to load feature encoder due to version compatibility")
-                    except Exception as e:
-                        st.warning(f"Failed to load feature encoder: {e}")
-                        st.warning("This model was saved before the preprocessing fix. Please retrain the model to use cached preprocessors.")
-                
-                if preprocessing_info.get('feature_scaler'):
-                    try:
-                        feature_scaler = load_model_from_base64(preprocessing_info['feature_scaler'])
-                        if feature_scaler is None:
-                            st.warning("Failed to load feature scaler due to version compatibility")
-                    except Exception as e:
-                        st.warning(f"Failed to load feature scaler: {e}")
-                        st.warning("This model was saved before the preprocessing fix. Please retrain the model to use cached preprocessors.")
-                
-                # 向后兼容性检查：如果无法从缓存中恢复预处理器，尝试使用session state中的
-                if feature_encoder is None and hasattr(st.session_state, 'feature_encoder'):
-                    feature_encoder = st.session_state.feature_encoder
-                    st.info("Using fallback preprocessor from current session")
-                
-                if feature_scaler is None and hasattr(st.session_state, 'feature_scaler'):
-                    feature_scaler = st.session_state.feature_scaler
-                    st.info("Using fallback preprocessor from current session")
-                
-                training_feature_info = {
-                    'feature_names': feature_info.get('feature_names', []),
-                    'feature_columns': feature_info.get('feature_columns', []),
-                    'numeric_features': feature_info.get('numeric_features', []),
-                    'categorical_features': feature_info.get('categorical_features', []),
-                    'training_columns': feature_info.get('feature_columns', []),
-                    'processed_feature_names': feature_info.get('feature_names', []),
-                    'feature_encoder': feature_encoder,  # 恢复的预处理器对象
-                    'feature_scaler': feature_scaler,    # 恢复的预处理器对象
-                    'target_variable': cached_model_details['target_variable']
-                }
-                training_data_type = "advanced_preprocessing_dataset"
-                
-                # 保存训练特征信息到session_state
-                st.session_state.training_feature_info = training_feature_info
-                
-                # 显示模型信息
-                eval_results = cached_model_details['evaluation_results']
-                st.success(f"""
-                Loaded cached model: {model_name} for {model_target}
-                - Test R²: {eval_results.get('test_r2', 'N/A'):.4f}
-                - CV R²: {eval_results.get('cv_r2_mean', 'N/A'):.4f}
-                """)
-            else:
-                st.error("Failed to load selected cached model")
-                st.stop()
-        except Exception as e:
-            st.error(f"Error loading cached model: {e}")
             st.stop()
     
     # 检查训练数据类型
