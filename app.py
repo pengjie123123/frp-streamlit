@@ -1998,29 +1998,16 @@ def render_data_overview_admin(df, table_name, data_manager):
     st.markdown("#### Dataset Preview")
     
     # Information bar
-    info_col1, info_col2 = st.columns([3, 1])
+    info_col1, info_col2 = st.columns([5, 2])
     with info_col1:
         if original_count != unique_count:
             st.info(f"Showing {unique_count:,} unique records (filtered from {original_count:,} total), {len(stats_df.columns)} fields")
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
-                data_manager.invalidate_cache(f"table_{table_name}")
-                st.rerun()
-        with col_b:
-            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
-                with st.spinner("Loading full dataset..."):
-                    full_data = load_full_data()
-                    if full_data is not None:
-                        st.session_state.df_raw = full_data
-                        data_manager.invalidate_cache(f"table_{table_name}")
-                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to load full dataset")
+        if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+            data_manager.invalidate_cache(f"table_{table_name}")
+            st.rerun()
     
     # Data table
     if len(df) > 0:
