@@ -3354,6 +3354,15 @@ class FRPDataPreprocessor:
         self.engine = engine
         self.data_ori = None
         self.cache_table_name = "preprocessed_data_cache"
+        self.cache_available = engine is not None
+        
+        # 只在数据库可用时初始化缓存表
+        if self.cache_available:
+            try:
+                self._init_cache_table()
+            except Exception as e:
+                print(f"Cache table initialization failed: {e}")
+                self.cache_available = False
         
     def _init_cache_table(self):
         """初始化缓存表"""
@@ -3399,8 +3408,15 @@ class FRPDataPreprocessor:
         data_string = json.dumps(data_info, sort_keys=True)
         return hashlib.sha256(data_string.encode()).hexdigest()
     
+    def _is_cache_available(self):
+        """检查缓存是否可用"""
+        return self.cache_available and self.engine is not None
+    
     def get_cached_data(self, cache_key):
         """从缓存中获取预处理数据"""
+        if not self._is_cache_available():
+            return None, None, None, None
+            
         try:
             self._init_cache_table()
             
@@ -3437,6 +3453,10 @@ class FRPDataPreprocessor:
     
     def save_to_cache(self, cache_key, df, feature_columns):
         """保存预处理数据到缓存"""
+        if not self._is_cache_available():
+            print("Cache not available, skipping save")
+            return
+            
         try:
             self._init_cache_table()
             
@@ -4117,8 +4137,8 @@ def create_advanced_model_dataset():
         st.error("Please load raw data first")
         return None
     
-    # Create data preprocessor
-    engine = get_db_engine()
+    # Create data preprocessor - handle database unavailability gracefully
+    engine = get_db_engine() if st.session_state.get("database_available", False) else None
     processor = FRPDataPreprocessor(engine)
     
     # Execute complete data preprocessing pipeline
@@ -4153,21 +4173,27 @@ inject_custom_css()
 data_manager = DataManager()
 
 # Get database connection and initialize system
-engine = get_db_engine()
-if engine:
-    # 只在session state中没有初始化标记时才执行这些操作
-    if "system_initialized" not in st.session_state:
-        tables_created = create_tables(engine)
-        if tables_created:
-            admin_success, admin_email, admin_status = initialize_admin(engine)
-        else:
-            admin_success, admin_email, admin_status = False, None, "Database connection failed"
+try:
+    engine = get_db_engine()
+    if engine:
+        # 只在session state中没有初始化标记时才执行这些操作
+        if "system_initialized" not in st.session_state:
+            tables_created = create_tables(engine)
+            if tables_created:
+                admin_success, admin_email, admin_status = initialize_admin(engine)
+            else:
+                admin_success, admin_email, admin_status = False, None, "Database connection failed"
+            st.session_state.system_initialized = True
+            st.session_state.database_available = tables_created
+    else:
         st.session_state.system_initialized = True
-        st.session_state.database_available = tables_created
-else:
+        st.session_state.database_available = False
+        st.warning("⚠️ Running in offline mode - some features may be limited")
+except Exception as e:
+    print(f"Database initialization failed: {e}")
     st.session_state.system_initialized = True
     st.session_state.database_available = False
-    st.warning("⚠️ Running in offline mode - some features may be limited")
+    st.warning("⚠️ Database unavailable - running in offline mode")
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
