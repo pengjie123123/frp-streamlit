@@ -2005,22 +2005,9 @@ def render_data_overview_admin(df, table_name, data_manager):
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
-                data_manager.invalidate_cache(f"table_{table_name}")
-                st.rerun()
-        with col_b:
-            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
-                with st.spinner("Loading full dataset..."):
-                    full_data = load_full_data()
-                    if full_data is not None:
-                        st.session_state.df_raw = full_data
-                        data_manager.invalidate_cache(f"table_{table_name}")
-                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to load full dataset")
+        if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+            data_manager.invalidate_cache(f"table_{table_name}")
+            st.rerun()
     
     # Data table
     if len(df) > 0:
@@ -4015,9 +4002,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 减少首屏读取量：只读取最新1000条记录，避免大查询
-                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
+                # 加载全部数据
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4051,27 +4038,6 @@ def load_default_data():
     else:
         st.error("Database engine not available")
         return None
-
-@st.cache_data(ttl=86400)  # 全量数据缓存24小时
-def load_full_data():
-    """Load full dataset - only when explicitly requested"""
-    engine = get_db_engine()
-    if engine:
-        try:
-            print(f"Loading FULL data from database: {DB_NAME}")
-            with engine.connect() as conn:
-                # 加载全量数据
-                df = pd.read_sql("SELECT * FROM research_data", engine)
-                print(f"Successfully loaded FULL dataset: {len(df)} rows")
-            
-            # Basic data cleaning
-            df.replace({"Notreported": np.nan, "SMD": np.nan, "smd": np.nan}, inplace=True)
-            
-            return df
-        except Exception as e:
-            print(f"Error loading full data: {e}")
-            return None
-    return None
 
 def create_advanced_model_dataset():
     """Create advanced model dataset (using improved preprocessing methods)"""
@@ -12293,8 +12259,8 @@ def render_footer():
 # 调用主应用程序
 if __name__ == "__main__":
     try:
-        # 确保数据在需要时能够加载，保持现有的缓存优化
-        main()
+        # 不再调用main()，避免重复数据加载
+        # main()
         render_footer()
     except Exception as e:
         st.error(f"Application Error: {e}")
