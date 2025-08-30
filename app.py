@@ -1939,7 +1939,7 @@ def render_data_overview_admin(df, table_name, data_manager):
         <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center;">
             <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600;">UNIQUE RECORDS</h4>
             <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700;">{unique_count:,}</h2>
-            <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Data entries (Live)</p>
+            <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Data entries</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4015,9 +4015,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 减少首屏读取量：只读取最新1000条记录，避免大查询
-                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
+                # 读取所有研究数据
+                df = pd.read_sql("SELECT * FROM research_data", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -7473,7 +7473,7 @@ with tabs[tab_indexes["model_configuration"]]:
             <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
                 <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">RAW DATASET</h4>
                 <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{raw_data_count:,}</h2>
-                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Records available (Live)</p>
+                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Records available</p>
             </div>
             """, unsafe_allow_html=True)
         
