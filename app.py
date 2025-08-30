@@ -1934,11 +1934,16 @@ def render_data_overview_admin(df, table_name, data_manager):
     # Statistical metric cards following Model Configuration style
     metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
     
+    # Get total record count from database
+    total_records = get_total_record_count()
+    if total_records is None:
+        total_records = unique_count  # Fallback to current data count
+    
     with metrics_col1:
         st.markdown(f"""
         <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center;">
             <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600;">UNIQUE RECORDS</h4>
-            <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700;">{unique_count:,}</h2>
+            <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700;">{total_records:,}</h2>
             <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Data entries</p>
         </div>
         """, unsafe_allow_html=True)
@@ -2000,8 +2005,13 @@ def render_data_overview_admin(df, table_name, data_manager):
     # Information bar
     info_col1, info_col2 = st.columns([5, 2])
     with info_col1:
-        if original_count != unique_count:
-            st.info(f"Showing {unique_count:,} unique records (filtered from {original_count:,} total), {len(stats_df.columns)} fields")
+        # Get total record count for accurate display
+        total_records = get_total_record_count()
+        if total_records is None:
+            total_records = original_count  # Fallback to current data count
+            
+        if total_records > len(stats_df):
+            st.info(f"Showing {len(stats_df):,} records (from {total_records:,} total), {len(stats_df.columns)} fields")
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
@@ -2069,12 +2079,17 @@ def render_data_overview_viewer(df):
     # Basic statistics for viewer users
     metrics_col1, metrics_col2, metrics_col3 = st.columns(3)
     
+    # Get total record count from database
+    total_records = get_total_record_count()
+    if total_records is None:
+        total_records = unique_count  # Fallback to current data count
+    
     with metrics_col1:
         st.markdown(f"""
         <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center;">
             <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600;">RECORDS</h4>
-            <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700;">{unique_count:,}</h2>
-            <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Data entries</p>
+            <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700;">{total_records:,}</h2>
+            <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Total entries</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -4038,6 +4053,22 @@ def load_default_data():
     else:
         st.error("Database engine not available")
         return None
+
+@st.cache_data(ttl=3600)  # 缓存1小时，COUNT查询很轻量
+def get_total_record_count():
+    """Get total record count from database - lightweight query"""
+    engine = get_db_engine()
+    if engine:
+        try:
+            with engine.connect() as conn:
+                result = conn.execute(text("SELECT COUNT(*) FROM research_data"))
+                total_count = result.scalar()
+                print(f"Total record count: {total_count}")
+                return total_count
+        except Exception as e:
+            print(f"Error getting record count: {e}")
+            return None
+    return None
 
 @st.cache_data(ttl=86400)  # 全量数据缓存24小时
 def load_full_data():
