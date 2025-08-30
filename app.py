@@ -99,8 +99,7 @@ def get_db_engine():
     from sqlalchemy.pool import QueuePool
 
     host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
-    # 添加SSL和认证参数以解决caching_sha2_password认证问题
-    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&ssl_disabled=true&auth_plugin=mysql_native_password"
+    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
 
     engine = create_engine(
         url,
@@ -111,13 +110,6 @@ def get_db_engine():
         max_overflow=3,      # 减少最大溢出连接
         pool_timeout=30,     # 连接超时
         pool_reset_on_return='commit',  # 连接返回时重置
-        connect_args={
-            'auth_plugin': 'mysql_native_password',
-            'ssl_disabled': True,
-            'connect_timeout': 60,
-            'read_timeout': 60,
-            'write_timeout': 60
-        }
     )
     
     # 添加SQL查询日志来监控大查询
@@ -129,34 +121,6 @@ def get_db_engine():
             print(f"[BIG SQL DETECTED] {statement[:100]}...")
         elif "research_data" in statement:
             print(f"[SQL] Limited query on research_data")
-    
-    # 测试连接
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        print("Database connection successful")
-    except Exception as e:
-        print(f"Database connection failed: {e}")
-        # 如果认证失败，尝试不指定认证插件的备选方案
-        if "caching_sha2_password" in str(e) or "auth_plugin" in str(e):
-            print("Trying fallback connection without auth_plugin specification...")
-            fallback_url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&ssl_disabled=true"
-            engine = create_engine(
-                fallback_url,
-                poolclass=QueuePool,
-                pool_pre_ping=True,
-                pool_recycle=3600,
-                pool_size=2,
-                max_overflow=3,
-                pool_timeout=30,
-                pool_reset_on_return='commit',
-                connect_args={
-                    'ssl_disabled': True,
-                    'connect_timeout': 60,
-                    'read_timeout': 60,
-                    'write_timeout': 60
-                }
-            )
     
     return engine
 
@@ -2291,77 +2255,70 @@ def is_ip_allowed(ip_address):
 # ——————————————————————————————
 def create_tables(engine):
     """Create necessary database tables"""
-    try:
-        with engine.connect() as conn:
-            # Create user table
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    name VARCHAR(255) NOT NULL,
-                    institution VARCHAR(255),
-                    ip_address VARCHAR(45),
-                    role VARCHAR(50) DEFAULT 'viewer',
-                    status VARCHAR(50) DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    approved_by VARCHAR(255),
-                    approved_at TIMESTAMP NULL
-                )
-            """))
+    with engine.connect() as conn:
+        # Create user table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                institution VARCHAR(255),
+                ip_address VARCHAR(45),
+                role VARCHAR(50) DEFAULT 'viewer',
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                approved_by VARCHAR(255),
+                approved_at TIMESTAMP NULL
+            )
+        """))
 
-            # Create data change request table
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS data_changes (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_email VARCHAR(255) NOT NULL,
-                    change_type VARCHAR(50) NOT NULL,
-                    table_name VARCHAR(50) NOT NULL,
-                    record_id INT,
-                    old_data JSON,
-                    new_data JSON,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    reviewed_by VARCHAR(255),
-                    reviewed_at TIMESTAMP NULL,
-                    review_comment TEXT
-                )
-            """))
+        # Create data change request table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS data_changes (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_email VARCHAR(255) NOT NULL,
+                change_type VARCHAR(50) NOT NULL,
+                table_name VARCHAR(50) NOT NULL,
+                record_id INT,
+                old_data JSON,
+                new_data JSON,
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reviewed_by VARCHAR(255),
+                reviewed_at TIMESTAMP NULL,
+                review_comment TEXT
+            )
+        """))
 
-            # Create operation log table
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS operation_logs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_email VARCHAR(255) NOT NULL,
-                    operation_type VARCHAR(50) NOT NULL,
-                    table_name VARCHAR(50),
-                    record_id INT,
-                    details JSON,
-                    ip_address VARCHAR(45),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
+        # Create operation log table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS operation_logs (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_email VARCHAR(255) NOT NULL,
+                operation_type VARCHAR(50) NOT NULL,
+                table_name VARCHAR(50),
+                record_id INT,
+                details JSON,
+                ip_address VARCHAR(45),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
 
-            # Create version control table
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS data_versions (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    table_name VARCHAR(50) NOT NULL,
-                    record_id INT NOT NULL,
-                    version_number INT NOT NULL,
-                    data JSON NOT NULL,
-                    changed_by VARCHAR(255) NOT NULL,
-                    change_type VARCHAR(50),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
+        # Create version control table
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS data_versions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                table_name VARCHAR(50) NOT NULL,
+                record_id INT NOT NULL,
+                version_number INT NOT NULL,
+                data JSON NOT NULL,
+                changed_by VARCHAR(255) NOT NULL,
+                change_type VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
 
-            conn.commit()
-            print("Database tables created successfully")
-            return True
-    except Exception as e:
-        print(f"Failed to create database tables: {e}")
-        st.warning("⚠️ Database connection issue detected. Running in offline mode.")
-        return False
+        conn.commit()
 
 # ——————————————————————————————
 # 8. Initialize Administrator Account
@@ -2372,40 +2329,45 @@ def initialize_admin(engine):
     admin_name = os.environ.get("ADMIN_NAME", "System Administrator")
     admin_institution = os.environ.get("ADMIN_INSTITUTION", "System")
 
-    try:
-        with engine.connect() as conn:
-            try:
-                result = conn.execute(
-                    text("SELECT email, name FROM users WHERE role = 'admin' AND status = 'approved'")
-                ).fetchone()
+    with engine.connect() as conn:
+        try:
+            result = conn.execute(
+                text("SELECT email, name FROM users WHERE role = 'admin' AND status = 'approved'")
+            ).fetchone()
 
-                if not result:
-                    conn.execute(
-                        text("""
-                            INSERT INTO users (name, email, institution, role, status, approved_by, approved_at, ip_address)
-                            VALUES (:name, :email, :institution, 'admin', 'approved', 'system', NOW(), '127.0.0.1')
-                        """),
-                        {
-                            "name": admin_name,
-                            "email": admin_email,
-                            "institution": admin_institution
-                        }
-                    )
-                    conn.commit()
-                    return True, admin_email, "created"
-                else:
-                    existing_email = result._asdict()['email'] if hasattr(result, '_asdict') else result[0]
-                    return True, existing_email, "exists"
+            if not result:
+                conn.execute(
+                    text("""
+                        INSERT INTO users (name, email, institution, role, status, approved_by, approved_at, ip_address)
+                        VALUES (:name, :email, :institution, 'admin', 'approved', 'system', NOW(), '127.0.0.1')
+                    """),
+                    {
+                        "name": admin_name,
+                        "email": admin_email,
+                        "institution": admin_institution
+                    }
+                )
+                conn.commit()
+                return True, admin_email, "created"
+            else:
+                existing_email = result._asdict()['email'] if hasattr(result, '_asdict') else result[0]
+                return True, existing_email, "exists"
 
-            except Exception as e:
-                if "Duplicate" in str(e):
-                    return True, admin_email, "duplicate"
-                else:
-                    print(f"Database operation error: {e}")
-                    return False, None, "db_error"
-    except Exception as e:
-        print(f"Database connection error in initialize_admin: {e}")
-        return False, None, "connection_error"
+        except Exception as e:
+            if "Duplicate" in str(e):
+                conn.execute(
+                    text("""
+                        UPDATE users
+                        SET role = 'admin', status = 'approved', approved_by = 'system', approved_at = NOW()
+                        WHERE email = :email
+                    """),
+                    {"email": admin_email}
+                )
+                conn.commit()
+                return True, admin_email, "upgraded"
+            else:
+                print(f"Administrator initialization failed: {e}")
+                return False, None, "error"
 
 # ——————————————————————————————
 # 9. User Authentication and Permission Management
@@ -3354,15 +3316,6 @@ class FRPDataPreprocessor:
         self.engine = engine
         self.data_ori = None
         self.cache_table_name = "preprocessed_data_cache"
-        self.cache_available = engine is not None
-        
-        # 只在数据库可用时初始化缓存表
-        if self.cache_available:
-            try:
-                self._init_cache_table()
-            except Exception as e:
-                print(f"Cache table initialization failed: {e}")
-                self.cache_available = False
         
     def _init_cache_table(self):
         """初始化缓存表"""
@@ -3408,15 +3361,8 @@ class FRPDataPreprocessor:
         data_string = json.dumps(data_info, sort_keys=True)
         return hashlib.sha256(data_string.encode()).hexdigest()
     
-    def _is_cache_available(self):
-        """检查缓存是否可用"""
-        return self.cache_available and self.engine is not None
-    
     def get_cached_data(self, cache_key):
         """从缓存中获取预处理数据"""
-        if not self._is_cache_available():
-            return None, None, None, None
-            
         try:
             self._init_cache_table()
             
@@ -3453,10 +3399,6 @@ class FRPDataPreprocessor:
     
     def save_to_cache(self, cache_key, df, feature_columns):
         """保存预处理数据到缓存"""
-        if not self._is_cache_available():
-            print("Cache not available, skipping save")
-            return
-            
         try:
             self._init_cache_table()
             
@@ -4073,9 +4015,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 加载所有数据以显示完整的5412条记录
-                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table")
+                # 减少首屏读取量：只读取最新5412条记录，避免大查询
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 5412", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4137,8 +4079,8 @@ def create_advanced_model_dataset():
         st.error("Please load raw data first")
         return None
     
-    # Create data preprocessor - handle database unavailability gracefully
-    engine = get_db_engine() if st.session_state.get("database_available", False) else None
+    # Create data preprocessor
+    engine = get_db_engine()
     processor = FRPDataPreprocessor(engine)
     
     # Execute complete data preprocessing pipeline
@@ -4173,27 +4115,13 @@ inject_custom_css()
 data_manager = DataManager()
 
 # Get database connection and initialize system
-try:
-    engine = get_db_engine()
-    if engine:
-        # 只在session state中没有初始化标记时才执行这些操作
-        if "system_initialized" not in st.session_state:
-            tables_created = create_tables(engine)
-            if tables_created:
-                admin_success, admin_email, admin_status = initialize_admin(engine)
-            else:
-                admin_success, admin_email, admin_status = False, None, "Database connection failed"
-            st.session_state.system_initialized = True
-            st.session_state.database_available = tables_created
-    else:
+engine = get_db_engine()
+if engine:
+    # 只在session state中没有初始化标记时才执行这些操作
+    if "system_initialized" not in st.session_state:
+        create_tables(engine)
+        admin_success, admin_email, admin_status = initialize_admin(engine)
         st.session_state.system_initialized = True
-        st.session_state.database_available = False
-        st.warning("⚠️ Running in offline mode - some features may be limited")
-except Exception as e:
-    print(f"Database initialization failed: {e}")
-    st.session_state.system_initialized = True
-    st.session_state.database_available = False
-    st.warning("⚠️ Database unavailable - running in offline mode")
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
