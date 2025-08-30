@@ -29,20 +29,6 @@ import time
 import io
 from sklearn.metrics import r2_score, mean_squared_error
 import pymysql
-
-# Streamlit配置 - 禁用自动刷新和监控机制
-st.set_page_config(
-    page_title="FRP Rebar Durability Prediction",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# 禁用文件监控和自动刷新
-if 'STREAMLIT_SERVER_FILE_WATCHER_TYPE' not in os.environ:
-    os.environ['STREAMLIT_SERVER_FILE_WATCHER_TYPE'] = 'none'
-if 'STREAMLIT_SERVER_HEADLESS' not in os.environ:
-    os.environ['STREAMLIT_SERVER_HEADLESS'] = 'true'
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -118,11 +104,12 @@ def get_db_engine():
     engine = create_engine(
         url,
         poolclass=QueuePool,
-        pool_pre_ping=False,  # 禁用pre_ping以减少网络流量
-        pool_recycle=86400,   # 24小时
-        pool_size=1,          # 最小连接池
-        max_overflow=0,       # 禁用溢出连接以减少流量
-        echo=False
+        pool_pre_ping=True,
+        pool_recycle=86400,  # 24小时刷新
+        pool_size=3,        # 减少连接池大小
+        max_overflow=5,     # 减少最大溢出连接
+        pool_timeout=30,    # 添加连接超时
+        pool_reset_on_return='commit',  # 连接返回时重置
     )
     return engine
 
@@ -253,18 +240,11 @@ def diagnose_model_performance(y_true, y_pred, model_name="Model"):
 # ——————————————————————————————
 # 1. Page Configuration
 # ——————————————————————————————
-# Page config已在文件开头设置，这里不再重复
-
-# 添加配置以防止自动刷新
-if 'app_initialized' not in st.session_state:
-    st.session_state.app_initialized = True
-    # 清除任何可能的自动刷新机制
-    try:
-        import streamlit.config as _config
-        _config.set_option("server.runOnSave", False)
-        _config.set_option("server.fileWatcherType", "none")
-    except:
-        pass
+st.set_page_config(
+    page_title="FRP Rebar Durability Prediction Platform",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # ——————————————————————————————
 # 2. Custom CSS Style Injection
@@ -1894,7 +1874,6 @@ def inject_custom_css():
 # 3. Helper Functions for Role-based UI Rendering
 # ——————————————————————————————
 
-@st.cache_data(ttl=86400)  # Cache for 24 hours to reduce database calls
 def check_database_connection():
     """检查数据库连接状态和数据可用性"""
     try:
@@ -1908,8 +1887,8 @@ def check_database_connection():
             if not result:
                 return False, "research_data table not found", 0
             
-            # 获取记录数量 - 使用LIMIT避免大表扫描
-            count = conn.execute(text("SELECT COUNT(*) FROM research_data LIMIT 1")).scalar()
+            # 获取记录数量
+            count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
             return True, f"Connected to {DB_NAME}", count
             
     except Exception as e:
@@ -3993,10 +3972,9 @@ class FRPDataPreprocessor:
         
         return final_data
 
-@st.cache_data(ttl=86400)  # 24小时缓存
-@st.cache_data(ttl=86400)  # Cache for 24 hours to prevent frequent reloads
+@st.cache_data
 def load_default_data():
-    """Load default data and perform basic cleaning - optimized for network efficiency"""
+    """Load default data and perform basic cleaning"""
     engine = get_db_engine()
     if engine:
         try:
@@ -4009,15 +3987,13 @@ def load_default_data():
                     print("research_data table does not exist")
                     return None
                 
-                # 加载数据 - 限制数据量以减少网络流量
-                # 只加载必要的列，限制行数，避免COUNT查询
-                df = pd.read_sql("""
-                    SELECT id, temperature, ph, chloride, time_days, mass_loss_percent, 
-                           specimen_id, specimen_type, environment_type, test_method
-                    FROM research_data 
-                    LIMIT 1000
-                """, engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table (limited to 1000)")
+                # 获取记录数量
+                count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
+                print(f"Found {count} records in research_data table")
+                
+                # 加载数据
+                df = pd.read_sql("SELECT * FROM research_data", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4038,50 +4014,18 @@ def load_default_data():
                         "NULL": np.nan, "null": np.nan
                     })
             
-            print(f"Data processing completed. Final dataset: {len(df)} rows, {len(df.columns)} columns")
+            # Additional data quality checks
+            print(f"Data shape after cleaning: {df.shape}")
+            print(f"Missing values per column: {df.isnull().sum().sum()} total missing values")
+            
             return df
-        
+            
         except Exception as e:
-            print(f"Error loading data from database: {e}")
+            print(f"Data loading error: {e}")
+            st.error(f"Database loading error: {e}")
             return None
-    
-    # 如果数据库失败，返回空DataFrame
-    return pd.DataFrame()
-
-@st.cache_data(ttl=86400)  # 24小时缓存用于预览
-def load_data_preview(limit=1000):
-    """Load a preview of data for display purposes"""
-    engine = get_db_engine()
-    if engine:
-        try:
-            df = pd.read_sql(f"""
-                SELECT id, temperature, ph, chloride, time_days, mass_loss_percent, 
-                       specimen_id, specimen_type, environment_type, test_method
-                FROM research_data 
-                ORDER BY id DESC
-                LIMIT {limit}
-            """, engine)
-            return df
-        except Exception as e:
-            print(f"Error loading data preview: {e}")
-            return None
-    return None
-
-# 继续load_default_data函数的数据处理部分
-def complete_data_processing(df):
-    """Complete the data processing for the loaded dataframe"""
-    if df is None or df.empty:
-        return df
-        
-    try:
-        print(f"Data shape after cleaning: {df.shape}")
-        print(f"Missing values per column: {df.isnull().sum().sum()} total missing values")
-        
-        return df
-        
-    except Exception as e:
-        print(f"Data loading error: {e}")
-        st.error(f"Database loading error: {e}")
+    else:
+        st.error("Database engine not available")
         return None
 
 def create_advanced_model_dataset():
@@ -4603,7 +4547,7 @@ else:
                 # 对其他表的处理
                 df = data_manager.get_data(
                     f"table_{table_name}",
-                    lambda: pd.read_sql(f"SELECT * FROM {table_name} LIMIT 5000", engine)
+                    lambda: pd.read_sql(f"SELECT * FROM {table_name}", engine)
                 )
             
             if df is None or len(df) == 0:
