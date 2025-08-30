@@ -99,39 +99,18 @@ def get_db_engine():
     from sqlalchemy.pool import QueuePool
 
     host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
-    
-    # 尝试多种认证方式解决caching_sha2_password问题
-    connection_urls = [
-        f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&auth_plugin=mysql_native_password",
-        f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&ssl_disabled=true",
-        f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
-    ]
-    
-    engine = None
-    for url in connection_urls:
-        try:
-            engine = create_engine(
-                url,
-                poolclass=QueuePool,
-                pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
-                pool_recycle=3600,   # 调整为1小时，减少连接重建频率
-                pool_size=2,         # 保持小连接池
-                max_overflow=3,      # 减少最大溢出连接
-                pool_timeout=30,     # 连接超时
-                pool_reset_on_return='commit',  # 连接返回时重置
-            )
-            # 测试连接
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-            print(f"Database connection successful with URL: {url.split('?')[0]}...")
-            break
-        except Exception as e:
-            print(f"Connection failed with URL: {url.split('?')[0]}... Error: {str(e)[:100]}")
-            engine = None
-            continue
-    
-    if engine is None:
-        raise RuntimeError("All database connection attempts failed")
+    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
+
+    engine = create_engine(
+        url,
+        poolclass=QueuePool,
+        pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
+        pool_recycle=3600,   # 调整为1小时，减少连接重建频率
+        pool_size=2,         # 保持小连接池
+        max_overflow=3,      # 减少最大溢出连接
+        pool_timeout=30,     # 连接超时
+        pool_reset_on_return='commit',  # 连接返回时重置
+    )
     
     # 添加SQL查询日志来监控大查询
     from sqlalchemy import event
@@ -1960,7 +1939,7 @@ def render_data_overview_admin(df, table_name, data_manager):
         <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center;">
             <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600;">UNIQUE RECORDS</h4>
             <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700;">{unique_count:,}</h2>
-            <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Data entries</p>
+            <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d;">Data entries (Live)</p>
         </div>
         """, unsafe_allow_html=True)
     
@@ -2029,6 +2008,9 @@ def render_data_overview_admin(df, table_name, data_manager):
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+                # 清除所有数据缓存
+                load_default_data.clear()
+                load_full_data.clear()
                 data_manager.invalidate_cache(f"table_{table_name}")
                 st.rerun()
         with col_b:
@@ -4036,8 +4018,8 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 减少首屏读取量：只读取最新5412条记录，避免大查询
-                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 5412", engine)
+                # 减少首屏读取量：只读取最新1000条记录，避免大查询
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
                 print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
             
             # Check for duplicates before cleaning
@@ -7494,7 +7476,7 @@ with tabs[tab_indexes["model_configuration"]]:
             <div style="background: white; padding: 0.8rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); text-align: center; border-left: 4px solid #3498db; height: 120px; display: flex; flex-direction: column; justify-content: center; overflow: hidden;">
                 <h4 style="color: #3498db; margin: 0; font-size: 0.75rem; font-weight: 600; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">RAW DATASET</h4>
                 <h2 style="color: #2c3e50; margin: 0.2rem 0; font-size: 1.4rem; font-weight: 700; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{raw_data_count:,}</h2>
-                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Records available</p>
+                <p style="margin: 0; font-size: 0.65rem; color: #7f8c8d; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Records available (Live)</p>
             </div>
             """, unsafe_allow_html=True)
         
