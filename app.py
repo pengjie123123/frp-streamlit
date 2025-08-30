@@ -2008,9 +2008,6 @@ def render_data_overview_admin(df, table_name, data_manager):
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
-                # 清除所有数据缓存
-                load_default_data.clear()
-                load_full_data.clear()
                 data_manager.invalidate_cache(f"table_{table_name}")
                 st.rerun()
         with col_b:
