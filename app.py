@@ -247,6 +247,13 @@ st.set_page_config(
 )
 
 # ——————————————————————————————
+# Traffic Debugging - Log every page load
+# ——————————————————————————————
+import sys
+print(f"[TRAFFIC DEBUG] Page load at {datetime.now()}", file=sys.stderr)
+print(f"[TRAFFIC DEBUG] Session ID: {st.session_state.get('session_id', 'new')}", file=sys.stderr)
+
+# ——————————————————————————————
 # 2. Custom CSS Style Injection
 # ——————————————————————————————
 def inject_custom_css():
@@ -2205,12 +2212,8 @@ def get_client_ip():
     try:
         hostname = socket.gethostname()
         ip = socket.gethostbyname(hostname)
-        # 记录访问日志
-        from datetime import datetime
-        print(f"[{datetime.now()}] Access detected - IP: {ip}, Hostname: {hostname}")
         return ip
-    except Exception as e:
-        print(f"[{datetime.now()}] Error getting IP: {e}")
+    except:
         return "127.0.0.1"
 
 def is_ip_allowed(ip_address):
@@ -4085,19 +4088,8 @@ if engine:
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
     # 延迟加载：只有当用户真正需要数据时才加载
-    from datetime import datetime
-    print(f"[{datetime.now()}] NEW SESSION - Setting up lazy loading")
     st.session_state.df_raw = None
     st.session_state.data_load_pending = True
-    st.session_state.session_start_time = datetime.now()
-else:
-    # 记录现有session的访问
-    from datetime import datetime
-    if hasattr(st.session_state, 'session_start_time'):
-        session_duration = datetime.now() - st.session_state.session_start_time
-        print(f"[{datetime.now()}] EXISTING SESSION - Duration: {session_duration}, Data loaded: {st.session_state.df_raw is not None}")
-    else:
-        print(f"[{datetime.now()}] EXISTING SESSION - Data loaded: {st.session_state.df_raw is not None}")
 
 # Verify data loading status
 if st.session_state.df_raw is not None:
