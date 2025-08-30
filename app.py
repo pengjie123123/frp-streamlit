@@ -2448,6 +2448,7 @@ def get_pending_changes(engine):
                 SELECT * FROM data_changes
                 WHERE status = 'pending'
                 ORDER BY created_at DESC
+                LIMIT 100
             """)
         ).fetchall()
         return result
@@ -4549,10 +4550,10 @@ else:
                 st.session_state.df_raw = df
                 
             else:
-                # 对其他表的处理
+                # 对其他表的处理 - 添加LIMIT限制避免大查询
                 df = data_manager.get_data(
                     f"table_{table_name}",
-                    lambda: pd.read_sql(f"SELECT * FROM {table_name}", engine)
+                    lambda: pd.read_sql(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 1000", engine)
                 )
             
             if df is None or len(df) == 0:
@@ -6686,14 +6687,25 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             </p>
         </div>
         """, unsafe_allow_html=True)
+        
+        @st.cache_data(ttl=300)  # 缓存5分钟，用户管理数据变化较频繁
+        def get_user_stats():
+            """获取用户统计信息"""
+            engine = get_db_engine()
+            if not engine:
+                return 0, 0, 0, 0
+            
+            pending_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'pending'", engine).iloc[0]['count']
+            approved_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'approved'", engine).iloc[0]['count']
+            rejected_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'rejected'", engine).iloc[0]['count']
+            total_requests = pd.read_sql("SELECT COUNT(*) as count FROM users", engine).iloc[0]['count']
+            return pending_count, approved_count, rejected_count, total_requests
+        
         # Management panel statistics cards
         col1, col2, col3, col4 = st.columns(4)
         
-        # Get statistical data
-        pending_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'pending'", engine).iloc[0]['count']
-        approved_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'approved'", engine).iloc[0]['count']
-        rejected_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'rejected'", engine).iloc[0]['count']
-        total_requests = pd.read_sql("SELECT COUNT(*) as count FROM users", engine).iloc[0]['count']
+        # Get statistical data with caching
+        pending_count, approved_count, rejected_count, total_requests = get_user_stats()
         
         with col1:
             st.markdown(f"""
@@ -6739,7 +6751,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             st.markdown("### Pending User Requests")
             
             pending_users = pd.read_sql(
-                "SELECT * FROM users WHERE status = 'pending' ORDER BY created_at DESC",
+                "SELECT * FROM users WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100",
                 engine
             )
             
@@ -6853,7 +6865,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             st.markdown("### Approved Users")
             
             approved_users = pd.read_sql(
-                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC",
+                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC LIMIT 100",
                 engine
             )
             
@@ -6890,7 +6902,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             st.markdown("### User Management")
             
             approved_users = pd.read_sql(
-                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC",
+                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC LIMIT 100",
                 engine
             )
             
