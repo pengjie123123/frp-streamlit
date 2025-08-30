@@ -2005,9 +2005,22 @@ def render_data_overview_admin(df, table_name, data_manager):
         else:
             st.info(f"Showing {len(stats_df):,} records, {len(stats_df.columns)} fields")
     with info_col2:
-        if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
-            data_manager.invalidate_cache(f"table_{table_name}")
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("Refresh Data", use_container_width=True, key="refresh_overview"):
+                data_manager.invalidate_cache(f"table_{table_name}")
+                st.rerun()
+        with col_b:
+            if st.button("Load Full Data", use_container_width=True, key="load_full_data"):
+                with st.spinner("Loading full dataset..."):
+                    full_data = load_full_data()
+                    if full_data is not None:
+                        st.session_state.df_raw = full_data
+                        data_manager.invalidate_cache(f"table_{table_name}")
+                        st.success(f"✅ Loaded full dataset: {len(full_data):,} records")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to load full dataset")
     
     # Data table
     if len(df) > 0:
@@ -2448,7 +2461,6 @@ def get_pending_changes(engine):
                 SELECT * FROM data_changes
                 WHERE status = 'pending'
                 ORDER BY created_at DESC
-                LIMIT 100
             """)
         ).fetchall()
         return result
@@ -4040,6 +4052,27 @@ def load_default_data():
         st.error("Database engine not available")
         return None
 
+@st.cache_data(ttl=86400)  # 全量数据缓存24小时
+def load_full_data():
+    """Load full dataset - only when explicitly requested"""
+    engine = get_db_engine()
+    if engine:
+        try:
+            print(f"Loading FULL data from database: {DB_NAME}")
+            with engine.connect() as conn:
+                # 加载全量数据
+                df = pd.read_sql("SELECT * FROM research_data", engine)
+                print(f"Successfully loaded FULL dataset: {len(df)} rows")
+            
+            # Basic data cleaning
+            df.replace({"Notreported": np.nan, "SMD": np.nan, "smd": np.nan}, inplace=True)
+            
+            return df
+        except Exception as e:
+            print(f"Error loading full data: {e}")
+            return None
+    return None
+
 def create_advanced_model_dataset():
     """Create advanced model dataset (using improved preprocessing methods)"""
     if "df_raw" not in st.session_state or st.session_state.df_raw is None:
@@ -4550,10 +4583,10 @@ else:
                 st.session_state.df_raw = df
                 
             else:
-                # 对其他表的处理 - 添加LIMIT限制避免大查询
+                # 对其他表的处理
                 df = data_manager.get_data(
                     f"table_{table_name}",
-                    lambda: pd.read_sql(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT 1000", engine)
+                    lambda: pd.read_sql(f"SELECT * FROM {table_name}", engine)
                 )
             
             if df is None or len(df) == 0:
@@ -6687,25 +6720,14 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             </p>
         </div>
         """, unsafe_allow_html=True)
-        
-        @st.cache_data(ttl=86400)  # 缓存24小时，减少数据库查询
-        def get_user_stats():
-            """获取用户统计信息"""
-            engine = get_db_engine()
-            if not engine:
-                return 0, 0, 0, 0
-            
-            pending_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'pending'", engine).iloc[0]['count']
-            approved_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'approved'", engine).iloc[0]['count']
-            rejected_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'rejected'", engine).iloc[0]['count']
-            total_requests = pd.read_sql("SELECT COUNT(*) as count FROM users", engine).iloc[0]['count']
-            return pending_count, approved_count, rejected_count, total_requests
-        
         # Management panel statistics cards
         col1, col2, col3, col4 = st.columns(4)
         
-        # Get statistical data with caching
-        pending_count, approved_count, rejected_count, total_requests = get_user_stats()
+        # Get statistical data
+        pending_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'pending'", engine).iloc[0]['count']
+        approved_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'approved'", engine).iloc[0]['count']
+        rejected_count = pd.read_sql("SELECT COUNT(*) as count FROM users WHERE status = 'rejected'", engine).iloc[0]['count']
+        total_requests = pd.read_sql("SELECT COUNT(*) as count FROM users", engine).iloc[0]['count']
         
         with col1:
             st.markdown(f"""
@@ -6751,7 +6773,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             st.markdown("### Pending User Requests")
             
             pending_users = pd.read_sql(
-                "SELECT * FROM users WHERE status = 'pending' ORDER BY created_at DESC LIMIT 100",
+                "SELECT * FROM users WHERE status = 'pending' ORDER BY created_at DESC",
                 engine
             )
             
@@ -6865,7 +6887,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             st.markdown("### Approved Users")
             
             approved_users = pd.read_sql(
-                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC LIMIT 100",
+                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC",
                 engine
             )
             
@@ -6902,7 +6924,7 @@ if "authenticated_user" in st.session_state and st.session_state["authenticated_
             st.markdown("### User Management")
             
             approved_users = pd.read_sql(
-                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC LIMIT 100",
+                "SELECT name, email, institution, role, approved_at FROM users WHERE status = 'approved' ORDER BY created_at DESC",
                 engine
             )
             
@@ -8199,6 +8221,9 @@ if __name__ == "__main__":
                     key="user_target_selection_auto"
                 )
                 
+                # 设置选中的目标变量
+                st.session_state.selected_target = user_target_option
+                
                 # 基于target自动选择最佳模型
                 try:
                     model_cache_manager = ModelCacheManager(engine)
@@ -8268,6 +8293,9 @@ if __name__ == "__main__":
                                 'target_variable': selected_model['target_variable']
                             }
                             
+                            # 设置选中的模型名称
+                            st.session_state.selected_model = user_model_option
+                            
                         else:
                             st.warning("No valid models found for the selected target.")
                             show_model_info = False
@@ -8303,6 +8331,9 @@ if __name__ == "__main__":
                         key="user_target_selection"
                     )
                 
+                # 设置选中的目标变量
+                st.session_state.selected_target = user_target_option
+                
                 # 执行手动模式的模型查找逻辑
                 try:
                     model_cache_manager = ModelCacheManager(engine)
@@ -8329,6 +8360,9 @@ if __name__ == "__main__":
                                     'model_name': selected_model['model_name'],
                                     'target_variable': selected_model['target_variable']
                                 }
+                                
+                                # 设置选中的模型名称
+                                st.session_state.selected_model = user_model_option
                         except Exception as e:
                             st.error(f"Error loading model details: {e}")
                             show_model_info = False
@@ -10636,6 +10670,23 @@ with tabs[tab_indexes["predictions"]]:
         </p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # 确保数据已加载 - 对所有用户
+    if st.session_state.df_raw is None:
+        st.info("Loading database...")
+        try:
+            # 自动加载数据
+            df = load_default_data()
+            if df is not None:
+                st.session_state.df_raw = df
+                st.success("Database loaded successfully!")
+                st.rerun()
+            else:
+                st.error("Failed to load database. Please check database connection.")
+                st.stop()
+        except Exception as e:
+            st.error(f"Error loading database: {e}")
+            st.stop()
     
     # 模型选择部分 - 只对admin用户显示
     if "authenticated_user" in st.session_state and st.session_state["authenticated_user"]["role"] == "admin":
