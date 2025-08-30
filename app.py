@@ -90,39 +90,39 @@ def _load_db_config_from_env_or_secrets():
     port = int(port) if port else 3306
     return host, port, user, pwd, dbname
 
-@st.cache_resource
 def get_db_engine():
     """
     用 SQLAlchemy 建 Engine（mysql+pymysql）
+    移除 @st.cache_resource 装饰器，避免启动时自动连接数据库
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import QueuePool
+    # 使用 session_state 来缓存引擎，避免重复创建
+    if "db_engine" not in st.session_state:
+        try:
+            from sqlalchemy import create_engine
+            from sqlalchemy.pool import QueuePool
 
-    host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
-    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
+            host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
+            url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
 
-    engine = create_engine(
-        url,
-        poolclass=QueuePool,
-        pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
-        pool_recycle=3600,   # 调整为1小时，减少连接重建频率
-        pool_size=2,         # 保持小连接池
-        max_overflow=3,      # 减少最大溢出连接
-        pool_timeout=30,     # 连接超时
-        pool_reset_on_return='commit',  # 连接返回时重置
-    )
-    
-    # 添加SQL查询日志来监控大查询
-    from sqlalchemy import event
-    @event.listens_for(engine, "before_cursor_execute")
-    def _log_sql(conn, cursor, statement, parameters, context, executemany):
-        # 只记录对research_data的大查询
-        if "research_data" in statement and "LIMIT" not in statement:
-            print(f"[BIG SQL DETECTED] {statement[:100]}...")
-        elif "research_data" in statement:
-            print(f"[SQL] Limited query on research_data")
-    
-    return engine
+            engine = create_engine(
+                url,
+                poolclass=QueuePool,
+                pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
+                pool_recycle=3600,   # 调整为1小时，减少连接重建频率
+                pool_size=2,         # 保持小连接池
+                max_overflow=3,      # 减少最大溢出连接
+                pool_timeout=30,     # 连接超时
+                pool_reset_on_return='commit',  # 连接返回时重置
+            )
+            
+            st.session_state.db_engine = engine
+            print("Database engine created successfully")
+            
+        except Exception as e:
+            print(f"Failed to create database engine: {e}")
+            st.session_state.db_engine = None
+            
+    return st.session_state.db_engine
 
 def get_raw_connection():
     """
