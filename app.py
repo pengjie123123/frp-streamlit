@@ -254,6 +254,38 @@ print(f"[TRAFFIC DEBUG] Page load at {datetime.now()}", file=sys.stderr)
 print(f"[TRAFFIC DEBUG] Session ID: {st.session_state.get('session_id', 'new')}", file=sys.stderr)
 
 # ——————————————————————————————
+# Health Check Detection and Lightweight Response
+# ——————————————————————————————
+def detect_health_check():
+    """检测是否为健康检查请求并提供轻量级响应"""
+    # 检查查询参数
+    query_params = st.experimental_get_query_params()
+    
+    # 如果是健康检查请求，返回最小响应
+    if 'health' in query_params or 'ping' in query_params:
+        st.text("OK")
+        st.stop()
+    
+    # 检查是否可能是自动化访问（基于session行为）
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = datetime.now().isoformat()
+        st.session_state.page_loads = 0
+        st.session_state.first_load_time = datetime.now()
+    
+    st.session_state.page_loads += 1
+    
+    # 如果在很短时间内没有用户交互，可能是自动化访问
+    time_since_first_load = (datetime.now() - st.session_state.first_load_time).total_seconds()
+    if st.session_state.page_loads == 1 and time_since_first_load < 5:
+        # 可能是健康检查，提供最小响应
+        print(f"[HEALTH CHECK] Minimal response for potential automated access", file=sys.stderr)
+        st.markdown("### System Status: ✅ Online")
+        st.stop()
+
+# 运行健康检查检测
+detect_health_check()
+
+# ——————————————————————————————
 # 2. Custom CSS Style Injection
 # ——————————————————————————————
 def inject_custom_css():
@@ -4075,6 +4107,11 @@ inject_custom_css()
 
 # Initialize data manager
 data_manager = DataManager()
+
+# 对于外部监控请求，返回简单响应
+if detect_health_check():
+    st.success("System is running")
+    st.stop()
 
 # Get database connection and initialize system
 engine = get_db_engine()
