@@ -3970,9 +3970,9 @@ class FRPDataPreprocessor:
         
         return final_data
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # 缓存1小时减少数据库查询
 def load_default_data():
-    """Load default data and perform basic cleaning"""
+    """Load default data and perform basic cleaning - optimized for network efficiency"""
     engine = get_db_engine()
     if engine:
         try:
@@ -3985,13 +3985,23 @@ def load_default_data():
                     print("research_data table does not exist")
                     return None
                 
-                # 获取记录数量
+                # 获取记录数量并检查是否过多
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 加载数据
-                df = pd.read_sql("SELECT * FROM research_data", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table")
+                # 警告：如果数据量太大，只加载部分数据
+                if count > 10000:
+                    print(f"Warning: Large dataset ({count} records). Loading only 10,000 records to optimize performance.")
+                
+                # 加载数据 - 限制数据量以减少网络流量
+                # 只加载必要的列，限制行数
+                df = pd.read_sql("""
+                    SELECT id, temperature, ph, chloride, time_days, mass_loss_percent, 
+                           specimen_id, specimen_type, environment_type, test_method
+                    FROM research_data 
+                    LIMIT 10000
+                """, engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table (limited)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
@@ -4012,7 +4022,42 @@ def load_default_data():
                         "NULL": np.nan, "null": np.nan
                     })
             
-            # Additional data quality checks
+            print(f"Data processing completed. Final dataset: {len(df)} rows, {len(df.columns)} columns")
+            return df
+        
+        except Exception as e:
+            print(f"Error loading data from database: {e}")
+            return None
+    
+    # 如果数据库失败，返回空DataFrame
+    return pd.DataFrame()
+
+@st.cache_data(ttl=1800)  # 30分钟缓存用于预览
+def load_data_preview(limit=1000):
+    """Load a preview of data for display purposes"""
+    engine = get_db_engine()
+    if engine:
+        try:
+            df = pd.read_sql(f"""
+                SELECT id, temperature, ph, chloride, time_days, mass_loss_percent, 
+                       specimen_id, specimen_type, environment_type, test_method
+                FROM research_data 
+                ORDER BY id DESC
+                LIMIT {limit}
+            """, engine)
+            return df
+        except Exception as e:
+            print(f"Error loading data preview: {e}")
+            return None
+    return None
+
+# 继续load_default_data函数的数据处理部分
+def complete_data_processing(df):
+    """Complete the data processing for the loaded dataframe"""
+    if df is None or df.empty:
+        return df
+        
+    try:
             print(f"Data shape after cleaning: {df.shape}")
             print(f"Missing values per column: {df.isnull().sum().sum()} total missing values")
             
@@ -4545,7 +4590,7 @@ else:
                 # 对其他表的处理
                 df = data_manager.get_data(
                     f"table_{table_name}",
-                    lambda: pd.read_sql(f"SELECT * FROM {table_name}", engine)
+                    lambda: pd.read_sql(f"SELECT * FROM {table_name} LIMIT 5000", engine)
                 )
             
             if df is None or len(df) == 0:
