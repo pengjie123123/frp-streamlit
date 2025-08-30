@@ -3996,7 +3996,7 @@ class FRPDataPreprocessor:
         
         return final_data
 
-@st.cache_data(ttl=3600)  # 缓存1小时，减少重复查询
+@st.cache_data(ttl=86400)  # 缓存24小时，减少重复查询
 def load_default_data():
     """Load default data and perform basic cleaning"""
     engine = get_db_engine()
@@ -4052,7 +4052,7 @@ def load_default_data():
         st.error("Database engine not available")
         return None
 
-@st.cache_data(ttl=7200)  # 全量数据缓存2小时
+@st.cache_data(ttl=86400)  # 全量数据缓存24小时
 def load_full_data():
     """Load full dataset - only when explicitly requested"""
     engine = get_db_engine()
