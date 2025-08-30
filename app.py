@@ -4007,9 +4007,9 @@ def load_default_data():
                 count = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar()
                 print(f"Found {count} records in research_data table")
                 
-                # 减少首屏读取量：只读取最新1000条记录，避免大查询
-                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC LIMIT 1000", engine)
-                print(f"Successfully loaded {len(df)} rows from research_data table (limited for performance)")
+                # 加载所有数据（依靠24小时缓存机制保证性能）
+                df = pd.read_sql("SELECT * FROM research_data ORDER BY id DESC", engine)
+                print(f"Successfully loaded {len(df)} rows from research_data table (all records)")
             
             # Check for duplicates before cleaning
             original_count = len(df)
