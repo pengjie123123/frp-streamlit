@@ -4116,22 +4116,29 @@ data_manager = DataManager()
 
 # Get database connection and initialize system
 engine = get_db_engine()
-if engine:
-    # 只在session state中没有初始化标记时才执行这些操作
-    if "system_initialized" not in st.session_state:
+
+# 完全禁用启动时的数据库初始化，改为延迟加载
+if "system_initialized" not in st.session_state:
+    st.session_state.system_initialized = False
+    st.session_state.db_connection_status = "pending"
+
+# 数据库初始化延迟到实际需要时
+def initialize_database_if_needed():
+    """延迟初始化数据库，只在实际需要时执行"""
+    if not st.session_state.get("system_initialized", False) and engine:
         try:
             create_tables(engine)
             admin_success, admin_email, admin_status = initialize_admin(engine)
             st.session_state.system_initialized = True
             st.session_state.db_connection_status = "connected"
+            return True
         except Exception as e:
             print(f"Database initialization failed: {e}")
             st.session_state.system_initialized = False
             st.session_state.db_connection_status = "failed"
             st.session_state.db_error_message = str(e)
-else:
-    st.session_state.system_initialized = False
-    st.session_state.db_connection_status = "no_engine"
+            return False
+    return st.session_state.get("system_initialized", False)
 
 # Initialize session state with improved data loading
 if "df_raw" not in st.session_state:
@@ -4156,9 +4163,15 @@ st.markdown(create_gradient_header(
 # Display key metrics with database connection status
 col1, col2, col3, col4 = st.columns(4)
 
-# Check database connection status
+# 默认值，不依赖数据库
+total_records = "N/A"
+active_users = "N/A"
+pending_changes = "N/A"
+db_status = "Not Connected"
+db_color = "#95a5a6"
+
+# 可选：尝试获取数据库信息，但不强制要求
 if engine and st.session_state.get("db_connection_status") == "connected":
-    # Get statistical data with error handling
     try:
         with engine.connect() as conn:
             total_records = conn.execute(text("SELECT COUNT(*) FROM research_data")).scalar() or 0
@@ -4169,33 +4182,23 @@ if engine and st.session_state.get("db_connection_status") == "connected":
                 text("SELECT COUNT(*) FROM data_changes WHERE status = 'pending'")
             ).scalar() or 0
             
-        # 数据库连接成功，显示正常指标
         db_status = "Connected"
         db_color = "#27ae60"
         
     except Exception as e:
-        # 数据库查询失败
-        total_records = 0
-        active_users = 0
-        pending_changes = 0
+        print(f"Database query error: {e}")
         db_status = "Query Failed"
         db_color = "#e67e22"
-        print(f"Database query error: {e}")
         
-else:
-    # 数据库连接失败或无引擎
-    total_records = 0
-    active_users = 0
-    pending_changes = 0
-    if st.session_state.get("db_connection_status") == "failed":
-        db_status = "Connection Failed"
-        db_color = "#e74c3c"
-    else:
-        db_status = "No Database"
-        db_color = "#95a5a6"
+elif st.session_state.get("db_connection_status") == "failed":
+    db_status = "Connection Failed"
+    db_color = "#e74c3c"
+elif st.session_state.get("db_connection_status") == "pending":
+    db_status = "Not Initialized"
+    db_color = "#f39c12"
 
 with col1:
-    st.markdown(create_metric_card("Total Records", f"{total_records:,}", 5.2, "normal", 0), unsafe_allow_html=True)
+    st.markdown(create_metric_card("Total Records", str(total_records), 5.2, "normal", 0), unsafe_allow_html=True)
 with col2:
     st.markdown(create_metric_card("Active Users Today", str(active_users), 12.3, "normal", 1), unsafe_allow_html=True)
 with col3:
