@@ -99,18 +99,39 @@ def get_db_engine():
     from sqlalchemy.pool import QueuePool
 
     host, port, user, pwd, dbname = _load_db_config_from_env_or_secrets()
-    url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
-
-    engine = create_engine(
-        url,
-        poolclass=QueuePool,
-        pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
-        pool_recycle=3600,   # 调整为1小时，减少连接重建频率
-        pool_size=2,         # 保持小连接池
-        max_overflow=3,      # 减少最大溢出连接
-        pool_timeout=30,     # 连接超时
-        pool_reset_on_return='commit',  # 连接返回时重置
-    )
+    
+    # 尝试多种认证方式解决caching_sha2_password问题
+    connection_urls = [
+        f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&auth_plugin=mysql_native_password",
+        f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4&ssl_disabled=true",
+        f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{dbname}?charset=utf8mb4"
+    ]
+    
+    engine = None
+    for url in connection_urls:
+        try:
+            engine = create_engine(
+                url,
+                poolclass=QueuePool,
+                pool_pre_ping=True,  # 恢复pre_ping，但调大recycle时间
+                pool_recycle=3600,   # 调整为1小时，减少连接重建频率
+                pool_size=2,         # 保持小连接池
+                max_overflow=3,      # 减少最大溢出连接
+                pool_timeout=30,     # 连接超时
+                pool_reset_on_return='commit',  # 连接返回时重置
+            )
+            # 测试连接
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            print(f"Database connection successful with URL: {url.split('?')[0]}...")
+            break
+        except Exception as e:
+            print(f"Connection failed with URL: {url.split('?')[0]}... Error: {str(e)[:100]}")
+            engine = None
+            continue
+    
+    if engine is None:
+        raise RuntimeError("All database connection attempts failed")
     
     # 添加SQL查询日志来监控大查询
     from sqlalchemy import event
